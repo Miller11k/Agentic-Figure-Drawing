@@ -1,0 +1,159 @@
+:root {
+    --bg-color: #0f172a;
+    --card-bg: #1e293b;
+    --accent: #38bdf8;
+    --accent-hover: #0ea5e9;
+    --text-main: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border: #334155;
+    --error: #ef4444;
+    --success: #10b981;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+}
+
+.upload-container {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: 24px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    width: 100%;
+    max-width: 440px; /* Limits the max width, ensuring the text box can't be wider than this */
+    border: 1px solid var(--border);
+}
+
+/* Mode Switcher - Modern Segmented Control */
+.mode-selector {
+    display: flex;
+    background: #0f172a;
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 0.75rem; /* Reduced from 1.5rem */
+    margin-top: 0.75rem;
+    border: 1px solid var(--border);
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 8px;
+    color: var(--text-muted);
+}
+
+.mode-btn.active {
+    background: var(--accent);
+    color: #0f172a;
+}
+
+/* Drop Zone - Pulsing & Clean */
+.drop-zone {
+    min-height: 200px;
+    width: 100%;
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(15, 23, 42, 0.5);
+    transition: all 0.3s ease;
+    cursor: pointer;
+    padding: 20px;
+    box-sizing: border-box;
+    color: var(--text-muted);
+}
+
+.drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background-color: rgba(56, 189, 248, 0.05);
+    color: var(--accent);
+}
+
+#preview-img {
+    max-width: 100%;
+    border-radius: 12px;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
+}
+
+/* Input Styling */
+textarea {
+    width: 100%; /* Changed to 100% so it aligns perfectly with the boxes above */
+    box-sizing: border-box; /* Ensures padding doesn't push the width past 100% */
+    min-height: 120px;
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    color: var(--text-main);
+    font-family: inherit;
+    font-size: 0.95rem;
+    resize: vertical;
+    transition: border-color 0.2s;
+    margin-top: 0; /* Changed from 1rem to 0 */
+}
+
+textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+/* Buttons */
+.button-group {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 12px;
+}
+
+button {
+    font-family: inherit;
+    font-size: 0.95rem;
+    transition: transform 0.1s, filter 0.2s;
+}
+
+.btn-submit {
+    flex: 2;
+    background: var(--accent);
+    color: #0f172a;
+    padding: 12px;
+}
+
+.btn-submit:hover {
+    filter: brightness(1.1);
+}
+
+.btn-restart {
+    flex: 1;
+    background: #334155;
+    color: var(--text-main);
+    padding: 12px;
+}
+
+.error-text {
+    color: var(--error);
+    font-size: 0.8rem;
+    margin-top: 10px;
+    min-height: 1.2rem;
+}
+
+.hidden { display: none !important; }
+
+/* Hide the drop zone when Prompt Only mode is active */
+.mode-prompt-active #drop-zone-wrapper {
+    display: none;
+}

@@ -41,15 +41,15 @@ def display_available_models(server_url):
             print(f"[{i}] {m}")
 
 
-def process_prompt(model_name, denoise_val, prompt_text, server_url, 
-                  seed = None, steps = 20, cfg = 8, sampler = "euler",
-                  scheduler = "normal", denoise = 0.6):
+def process_prompt(model_name, denoise_val: float, prompt_text, server_url, 
+                  seed = None, steps: int = 20, cfg: float = 8.0, sampler = "euler",
+                  scheduler = "normal", denoise: float = 0.6):
     pass
 
 
-def process_image(model_name, denoise_val, prompt_text, server_url, input_image, 
-                  seed = None, steps = 20, cfg = 8, sampler = "euler",
-                  scheduler = "normal", denoise = 0.6):
+def process_image(model_name, denoise_val: float, prompt_text, server_url, input_image, 
+                  seed = None, steps: int = 20, cfg: float = 8.0, sampler = "euler",
+                  scheduler = "normal", denoise: float = 0.6):
     # 1. Upload to Server
     print(f"Uploading {os.path.basename(input_image)} to {server_url}...")
     try:

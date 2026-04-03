@@ -41,7 +41,7 @@ def display_available_models(server_url):
             print(f"[{i}] {m}")
 
 
-def process_prompt(model_name, denoise_val, prompt_text, server_url, input_image, 
+def process_prompt(model_name, denoise_val, prompt_text, server_url, 
                   seed = None, steps = 20, cfg = 8, sampler = "euler",
                   scheduler = "normal", denoise = 0.6):
     pass

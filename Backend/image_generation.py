@@ -18,7 +18,7 @@ CHECKPOINT_LOADER_ID = "4"
 
 
 def list_models(server_url):
-    """Fetches all available checkpoints from the Precision workstation."""
+    """Fetches all available checkpoints from the Server."""
     try:
         response = requests.get(f"{server_url}/object_info")
         data = response.json()
@@ -50,7 +50,7 @@ def process_prompt(model_name, denoise_val, prompt_text, server_url, input_image
 def process_image(model_name, denoise_val, prompt_text, server_url, input_image, 
                   seed = None, steps = 20, cfg = 8, sampler = "euler",
                   scheduler = "normal", denoise = 0.6):
-    # 1. Upload to Precision
+    # 1. Upload to Server
     print(f"Uploading {os.path.basename(input_image)} to {server_url}...")
     try:
         with open(input_image, "rb") as f:

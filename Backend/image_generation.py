@@ -6,7 +6,7 @@ import random
 from dotenv import load_dotenv
 
 # Configuration
-WORKFLOW_FILE = "workflow_api.json"
+WORKFLOW_FILE = "workflow_api_with_image.json"
 
 # Node IDs from verified workflow_api.json
 LOAD_IMAGE_ID = "10" 

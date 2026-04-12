@@ -13,6 +13,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+Backend/data/
 downloads/
 eggs/
 .eggs/
@@ -140,8 +141,14 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.tmp/
+.deps/
 env/
 venv/
+ComfyUI/models/
+ComfyUI/input/
+ComfyUI/output/
+ComfyUI/custom_nodes/
 ENV/
 env.bak/
 venv.bak/

@@ -29,9 +29,20 @@ const btnImageMode = document.getElementById("mode-image");
 const composerPanel = document.querySelector(".composer-panel");
 const sessionTitle = document.getElementById("session-title");
 const sessionPill = document.getElementById("session-pill");
+const downloadPngBtn = document.getElementById("download-png-btn");
+const downloadJsonBtn = document.getElementById("download-json-btn");
 const resultStage = document.getElementById("result-stage");
 const resultImage = document.getElementById("result-image");
 const resultPlaceholder = document.getElementById("result-placeholder");
+const maskPanel = document.getElementById("mask-panel");
+const maskStatus = document.getElementById("mask-status");
+const maskBrushLabel = document.getElementById("mask-brush-label");
+const maskBrushSize = document.getElementById("mask-brush-size");
+const maskUndoBtn = document.getElementById("mask-undo-btn");
+const maskClearBtn = document.getElementById("mask-clear-btn");
+const maskStage = document.getElementById("mask-stage");
+const maskBaseImage = document.getElementById("mask-base-image");
+const maskCanvas = document.getElementById("mask-canvas");
 const historyList = document.getElementById("history-list");
 const historyCount = document.getElementById("history-count");
 const modelSelect = document.getElementById("model-select");
@@ -46,6 +57,8 @@ const diagramCanvasPanel = document.getElementById("diagram-canvas-panel");
 const diagramCanvas = document.getElementById("diagram-canvas");
 const diagramXmlView = document.getElementById("diagram-xml-view");
 const diagramExportBtn = document.getElementById("diagram-export-btn");
+const diagramExportPngBtn = document.getElementById("diagram-export-png-btn");
+const diagramExportJsonBtn = document.getElementById("diagram-export-json-btn");
 const diagramToggleXmlBtn = document.getElementById("diagram-toggle-xml-btn");
 const diagramElementSelect = document.getElementById("diagram-element-select");
 const diagramLabelInput = document.getElementById("diagram-label-input");
@@ -87,6 +100,16 @@ const state = {
     selectedDiagramElementId: "",
     showDiagramXml: false,
     dragState: null,
+    pendingResultRequestId: 0,
+    maskBrushSize: Number(maskBrushSize?.value || 26),
+    maskDrawing: null,
+    maskHasPaint: false,
+    maskSourceUrl: "",
+    maskNaturalWidth: 0,
+    maskNaturalHeight: 0,
+    maskRenderedWidth: 0,
+    maskRenderedHeight: 0,
+    maskUndoStack: [],
 };
 
 resultImage.addEventListener("load", () => {
@@ -96,6 +119,31 @@ resultImage.addEventListener("load", () => {
 resultImage.addEventListener("error", () => {
     showError("The result image was generated, but the browser could not load it. Try refreshing the page or starting a new session.");
 });
+
+maskBaseImage.addEventListener("load", () => {
+    configureMaskCanvas();
+});
+
+maskCanvas.addEventListener("pointerdown", beginMaskStroke);
+maskCanvas.addEventListener("pointermove", continueMaskStroke);
+maskCanvas.addEventListener("pointerup", endMaskStroke);
+maskCanvas.addEventListener("pointercancel", endMaskStroke);
+
+window.addEventListener("resize", () => {
+    if (!maskPanel.classList.contains("hidden") && maskBaseImage.src) {
+        configureMaskCanvas();
+    }
+});
+
+function preloadImage(url) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.decoding = "async";
+        image.onload = () => resolve(url);
+        image.onerror = () => reject(new Error("The result image was generated, but the browser could not load it."));
+        image.src = url;
+    });
+}
 
 ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
     dropZone.addEventListener(eventName, (event) => {
@@ -137,6 +185,8 @@ btnImageMode.addEventListener("click", () => setMode("image"));
 clearUploadBtn.addEventListener("click", clearUpload);
 resetSessionBtn.addEventListener("click", resetSession);
 submitBtn.addEventListener("click", submitRequest);
+downloadPngBtn.addEventListener("click", downloadCurrentPng);
+downloadJsonBtn.addEventListener("click", downloadCurrentDiagramJson);
 modelSelect.addEventListener("change", () => {
     state.selectedModel = modelSelect.value;
     syncTaskRoutingSelection();
@@ -148,6 +198,7 @@ workflowProfileSelect.addEventListener("change", () => {
 });
 processingModeSelect.addEventListener("change", () => {
     state.processingMode = processingModeSelect.value;
+    refreshMaskEditor();
 });
 diagramElementSelect.addEventListener("change", () => {
     state.selectedDiagramElementId = diagramElementSelect.value;
@@ -158,6 +209,14 @@ diagramDeleteBtn.addEventListener("click", deleteDiagramElement);
 diagramAddBtn.addEventListener("click", addDiagramObject);
 diagramToggleXmlBtn.addEventListener("click", toggleDiagramXml);
 diagramExportBtn.addEventListener("click", exportDiagramXml);
+diagramExportPngBtn.addEventListener("click", downloadCurrentPng);
+diagramExportJsonBtn.addEventListener("click", downloadCurrentDiagramJson);
+maskBrushSize.addEventListener("input", () => {
+    state.maskBrushSize = Number(maskBrushSize.value || 26);
+    maskBrushLabel.textContent = `Brush Size: ${state.maskBrushSize} px`;
+});
+maskUndoBtn.addEventListener("click", undoMaskStroke);
+maskClearBtn.addEventListener("click", clearMaskOverlay);
 
 function setMode(mode) {
     state.currentMode = mode;
@@ -176,6 +235,7 @@ function setMode(mode) {
     }
 
     syncTaskRoutingSelection();
+    refreshMaskEditor();
 }
 
 function handleFile(file) {
@@ -198,6 +258,7 @@ function handleFile(file) {
         previewImg.hidden = false;
         drawioContainer.hidden = true;
         drawioContainer.innerHTML = "";
+        refreshMaskEditor();
     } else {
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -206,6 +267,7 @@ function handleFile(file) {
             renderDrawio(event.target?.result || "");
         };
         reader.readAsText(file);
+        refreshMaskEditor();
     }
 
     promptText.classList.add("hidden");
@@ -241,6 +303,240 @@ function renderDrawio(xmlData) {
     }
 }
 
+function getMaskSource() {
+    if (state.currentSession && state.currentSession.content_mode === "image" && state.currentSession.current_image_url) {
+        return withCacheBust(state.currentSession.current_image_url, state.currentSession.updated_at);
+    }
+    if (state.selectedFile && state.selectedFileKind === "image" && state.previewObjectUrl) {
+        return state.previewObjectUrl;
+    }
+    return "";
+}
+
+function refreshMaskEditor() {
+    const sourceUrl = getMaskSource();
+    const shouldShow = Boolean(sourceUrl) && state.processingMode !== "diagram" && !state.currentDiagramModel;
+    maskPanel.classList.toggle("hidden", !shouldShow);
+
+    if (!shouldShow) {
+        state.maskSourceUrl = "";
+        state.maskHasPaint = false;
+        state.maskUndoStack = [];
+        maskStatus.textContent = "No mask";
+        maskStage.style.width = "";
+        maskStage.style.height = "";
+        maskStage.style.backgroundImage = "";
+        const context = maskCanvas.getContext("2d");
+        context.clearRect(0, 0, maskCanvas.width || 1, maskCanvas.height || 1);
+        return;
+    }
+
+    if (state.maskSourceUrl !== sourceUrl) {
+        state.maskSourceUrl = sourceUrl;
+        state.maskHasPaint = false;
+        state.maskUndoStack = [];
+        maskStatus.textContent = "No mask";
+        maskBaseImage.src = sourceUrl;
+    }
+}
+
+function configureMaskCanvas() {
+    if (!maskBaseImage.naturalWidth || !maskBaseImage.naturalHeight) {
+        return;
+    }
+    state.maskNaturalWidth = maskBaseImage.naturalWidth;
+    state.maskNaturalHeight = maskBaseImage.naturalHeight;
+
+    const editorRect = maskPanel.querySelector(".mask-editor").getBoundingClientRect();
+    const maxWidth = Math.max(240, Math.floor(editorRect.width - 2));
+    const maxHeight = Math.max(220, Math.min(520, Math.floor(window.innerHeight * 0.48)));
+    const scale = Math.min(maxWidth / state.maskNaturalWidth, maxHeight / state.maskNaturalHeight, 1);
+    state.maskRenderedWidth = Math.max(1, Math.round(state.maskNaturalWidth * scale));
+    state.maskRenderedHeight = Math.max(1, Math.round(state.maskNaturalHeight * scale));
+
+    let previousMaskCanvas = null;
+    if (state.maskHasPaint && maskCanvas.width && maskCanvas.height) {
+        previousMaskCanvas = document.createElement("canvas");
+        previousMaskCanvas.width = maskCanvas.width;
+        previousMaskCanvas.height = maskCanvas.height;
+        previousMaskCanvas.getContext("2d").drawImage(maskCanvas, 0, 0);
+    }
+
+    maskStage.style.width = `${state.maskRenderedWidth}px`;
+    maskStage.style.height = `${state.maskRenderedHeight}px`;
+    maskStage.style.backgroundImage = `url("${state.maskSourceUrl}")`;
+    maskCanvas.width = state.maskRenderedWidth;
+    maskCanvas.height = state.maskRenderedHeight;
+    maskCanvas.style.width = `${state.maskRenderedWidth}px`;
+    maskCanvas.style.height = `${state.maskRenderedHeight}px`;
+
+    if (!state.maskHasPaint) {
+        clearMaskOverlay();
+        return;
+    }
+
+    if (previousMaskCanvas) {
+        const context = maskCanvas.getContext("2d");
+        context.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        context.drawImage(previousMaskCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+    }
+}
+
+function clearMaskOverlay() {
+    const context = maskCanvas.getContext("2d");
+    context.clearRect(0, 0, maskCanvas.width || 1, maskCanvas.height || 1);
+    state.maskHasPaint = false;
+    state.maskUndoStack = [];
+    maskStatus.textContent = "No mask";
+}
+
+function saveMaskUndoSnapshot() {
+    const context = maskCanvas.getContext("2d");
+    if (!maskCanvas.width || !maskCanvas.height) {
+        return;
+    }
+    state.maskUndoStack.push(context.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
+    if (state.maskUndoStack.length > 30) {
+        state.maskUndoStack.shift();
+    }
+}
+
+function undoMaskStroke() {
+    if (!state.maskUndoStack.length) {
+        return;
+    }
+    const context = maskCanvas.getContext("2d");
+    const snapshot = state.maskUndoStack.pop();
+    context.putImageData(snapshot, 0, 0);
+    state.maskHasPaint = hasMaskPixels();
+    maskStatus.textContent = state.maskHasPaint ? "Mask ready" : "No mask";
+    updateControls();
+}
+
+function beginMaskStroke(event) {
+    if (state.isBusy || maskPanel.classList.contains("hidden") || !maskCanvas.width || !maskCanvas.height) {
+        return;
+    }
+    event.preventDefault();
+    maskCanvas.setPointerCapture(event.pointerId);
+    saveMaskUndoSnapshot();
+    state.maskDrawing = { pointerId: event.pointerId, lastPoint: getMaskCanvasPoint(event) };
+    drawMaskStroke(state.maskDrawing.lastPoint, state.maskDrawing.lastPoint);
+}
+
+function continueMaskStroke(event) {
+    if (!state.maskDrawing || event.pointerId !== state.maskDrawing.pointerId) {
+        return;
+    }
+    event.preventDefault();
+    const point = getMaskCanvasPoint(event);
+    drawMaskStroke(state.maskDrawing.lastPoint, point);
+    state.maskDrawing.lastPoint = point;
+}
+
+function endMaskStroke(event) {
+    if (!state.maskDrawing || event.pointerId !== state.maskDrawing.pointerId) {
+        return;
+    }
+    state.maskDrawing = null;
+    maskCanvas.releasePointerCapture(event.pointerId);
+}
+
+function getMaskCanvasPoint(event) {
+    const rect = maskCanvas.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * maskCanvas.width;
+    const y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * maskCanvas.height;
+    return {
+        x: Math.max(0, Math.min(maskCanvas.width, x)),
+        y: Math.max(0, Math.min(maskCanvas.height, y)),
+    };
+}
+
+function drawMaskStroke(fromPoint, toPoint) {
+    const context = maskCanvas.getContext("2d");
+    context.strokeStyle = "rgba(217, 108, 47, 0.96)";
+    context.fillStyle = "rgba(217, 108, 47, 0.96)";
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = state.maskBrushSize;
+    context.beginPath();
+    context.moveTo(fromPoint.x, fromPoint.y);
+    context.lineTo(toPoint.x, toPoint.y);
+    context.stroke();
+    context.beginPath();
+    context.arc(toPoint.x, toPoint.y, state.maskBrushSize / 2, 0, Math.PI * 2);
+    context.fill();
+    state.maskHasPaint = true;
+    maskStatus.textContent = "Mask ready";
+    updateControls();
+}
+
+function hasMaskPixels() {
+    if (!maskCanvas.width || !maskCanvas.height) {
+        return false;
+    }
+    const context = maskCanvas.getContext("2d");
+    const imageData = context.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+    for (let index = 3; index < imageData.length; index += 4) {
+        if (imageData[index] > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+async function appendMaskToFormData(formData) {
+    if (!state.maskHasPaint || !maskCanvas.width || !maskCanvas.height) {
+        return;
+    }
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = state.maskNaturalWidth || maskCanvas.width;
+    exportCanvas.height = state.maskNaturalHeight || maskCanvas.height;
+    const exportContext = exportCanvas.getContext("2d");
+    exportContext.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+    exportContext.drawImage(maskCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+    const blob = await new Promise((resolve) => exportCanvas.toBlob(resolve, "image/png"));
+    if (blob) {
+        formData.append("mask_image", blob, "mask.png");
+    }
+}
+
+function buildStructuredDiagramPayload(diagramModel) {
+    if (!diagramModel) {
+        return null;
+    }
+    return {
+        elements: (diagramModel.elements || []).map((element) => ({
+            id: element.element_id,
+            type: isTextElement(element) ? "text" : element.element_type,
+            content: isTextElement(element) ? (element.label || "") : undefined,
+            label: !isTextElement(element) ? (element.label || "") : undefined,
+            position: { x: element.bbox.x, y: element.bbox.y },
+            dimensions: { width: element.bbox.width, height: element.bbox.height },
+            semantic_class: element.semantic_class,
+            asset_id: element.asset_id || null,
+        })),
+        connectors: (diagramModel.connectors || []).map((connector) => ({
+            id: connector.connector_id,
+            from: connector.source_element_id || null,
+            to: connector.target_element_id || null,
+            type: connector.semantic_class || "arrow",
+            label: connector.label || "",
+            anchor_points: connector.anchor_points || [],
+        })),
+        assets: (diagramModel.assets || []).map((asset) => ({
+            asset_id: asset.asset_id,
+            decision: asset.decision,
+            source_bbox: asset.source_bbox,
+            mime_type: asset.mime_type,
+        })),
+    };
+}
+
+function isTextElement(element) {
+    return element?.element_type === "label" || element?.element_type === "text";
+}
+
 function clearUpload() {
     revokePreviewUrl();
     state.selectedFile = null;
@@ -252,6 +548,8 @@ function clearUpload() {
     promptText.classList.remove("hidden");
     clearUploadBtn.classList.add("hidden");
     fileInput.value = "";
+    clearMaskOverlay();
+    refreshMaskEditor();
     setStatus("Upload cleared. You can keep editing the active session or choose a new source image.");
 }
 
@@ -264,6 +562,8 @@ function resetSession() {
     userDescription.value = "";
     renderSession(null);
     setMode(state.currentMode);
+    clearMaskOverlay();
+    refreshMaskEditor();
     setStatus("Started a fresh workspace. Submit a prompt or upload a new source image.");
 }
 
@@ -492,8 +792,14 @@ function doesProfileMatchModel(profile, modelName) {
     if (profile.name === "sd35") {
         return effectiveModel.includes("sd3.5") || effectiveModel.includes("sd35") || effectiveModel.includes("stable-diffusion-3.5");
     }
-    if (profile.name.startsWith("qwen")) {
-        return effectiveModel.includes("qwen");
+    if (profile.name === "qwen-image-edit-gguf") {
+        return effectiveModel.includes("qwen") && effectiveModel.includes(".gguf");
+    }
+    if (profile.name === "qwen-image-edit") {
+        return effectiveModel.includes("qwen") && effectiveModel.includes("edit") && !effectiveModel.includes(".gguf");
+    }
+    if (profile.name === "qwen-image") {
+        return effectiveModel.includes("qwen") && !effectiveModel.includes("edit") && !effectiveModel.includes(".gguf");
     }
     if (profile.name.startsWith("flux")) {
         return effectiveModel.includes("flux");
@@ -632,6 +938,7 @@ async function submitRequest() {
 
     if (!endpoint.endsWith("/generate")) {
         appendWorkflowTuning(formData, false);
+        await appendMaskToFormData(formData);
     }
 
     setBusy(true, endpoint.endsWith("/generate") ? "Generating a new base image..." : "Applying your edit...");
@@ -905,6 +1212,38 @@ function toggleDiagramXml() {
     diagramToggleXmlBtn.textContent = state.showDiagramXml ? "Hide XML" : "Show XML";
 }
 
+function triggerDownload(url, filename) {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+}
+
+function downloadCurrentPng() {
+    if (!state.currentSession?.current_image_url) {
+        showError("There is no current image to download yet.");
+        return;
+    }
+    triggerDownload(
+        withCacheBust(state.currentSession.current_image_url, state.currentSession.updated_at),
+        `session-${state.currentSession.session_id}-v${state.currentSession.current_index}.png`
+    );
+}
+
+function downloadCurrentDiagramJson() {
+    const payload = buildStructuredDiagramPayload(state.currentDiagramModel || state.currentSession?.current_diagram_model);
+    if (!payload) {
+        showError("Structured diagram JSON is only available when the current session is in diagram mode.");
+        return;
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    triggerDownload(url, `diagram-${state.currentSession?.session_id || "session"}.json`);
+    URL.revokeObjectURL(url);
+}
+
 function exportDiagramXml() {
     const xml = diagramXmlView.value;
     if (!xml) {
@@ -924,7 +1263,7 @@ function exportDiagramXml() {
 }
 
 function populateDiagramNodeSelects(elements) {
-    const nodeElements = elements.filter((element) => element.element_type !== "label");
+    const nodeElements = elements.filter((element) => !isTextElement(element));
     [diagramSourceSelect, diagramTargetSelect, diagramAddSource, diagramAddTarget].forEach((select) => {
         select.innerHTML = '<option value=""></option>';
         nodeElements.forEach((element) => {
@@ -968,14 +1307,14 @@ function renderDiagramCanvas() {
         const body = hasAsset
             ? `<image href="${asset.asset_data_url}" x="${element.bbox.x}" y="${element.bbox.y}" width="${element.bbox.width}" height="${element.bbox.height}" preserveAspectRatio="none"></image>
                <rect x="${element.bbox.x}" y="${element.bbox.y}" width="${element.bbox.width}" height="${element.bbox.height}" rx="14" ry="14" fill="transparent" stroke="${element.stroke_color || "#1f2b24"}" stroke-width="2"></rect>`
-            : element.element_type === "label"
+            : isTextElement(element)
                 ? `<text x="${element.bbox.x}" y="${element.bbox.y + 18}" class="canvas-label">${escapeHtml(element.label || element.element_id)}</text>`
                 : `<rect x="${element.bbox.x}" y="${element.bbox.y}" width="${element.bbox.width}" height="${element.bbox.height}" rx="14" ry="14" fill="${element.fill_color || "#ffffff"}" stroke="${element.stroke_color || "#1f2b24"}" stroke-width="3"></rect>`;
-        const text = element.element_type !== "label" && element.label
+        const text = !isTextElement(element) && element.label
             ? `<text x="${element.bbox.x + 12}" y="${element.bbox.y + 24}" class="canvas-label">${escapeHtml(element.label)}</text>`
             : "";
         return `
-            <g class="${rectClass}" data-element-id="${element.element_id}" data-draggable="${element.element_type !== "label"}">
+            <g class="${rectClass}" data-element-id="${element.element_id}" data-draggable="true">
                 ${body}
                 ${text}
             </g>
@@ -999,6 +1338,7 @@ function renderDiagramCanvas() {
 
 function renderSession(session) {
     if (!session) {
+        state.pendingResultRequestId += 1;
         state.activeModel = "";
         state.selectedModel = modelSelect.value;
         state.selectedWorkflowProfile = "";
@@ -1014,9 +1354,11 @@ function renderSession(session) {
         resultPlaceholder.hidden = false;
         resultImage.hidden = true;
         resultImage.src = "";
+        resultImage.style.opacity = "";
         historyCount.textContent = "0 steps";
         historyList.innerHTML = '<p class="history-empty">Generated versions will appear here once a session starts.</p>';
         renderDiagramEditor(null);
+        refreshMaskEditor();
         refreshModelHint();
         refreshWorkflowProfileHint();
         updateControls();
@@ -1041,7 +1383,8 @@ function renderSession(session) {
     resultStage.classList.remove("empty");
     resultPlaceholder.hidden = true;
     resultImage.hidden = false;
-    resultImage.src = withCacheBust(session.current_image_url, session.updated_at);
+    resultImage.fetchPriority = "high";
+    void updateResultImage(session.current_image_url, session.updated_at);
 
     historyCount.textContent = `${session.edit_history.length} ${session.edit_history.length === 1 ? "step" : "steps"}`;
     historyList.innerHTML = "";
@@ -1052,7 +1395,7 @@ function renderSession(session) {
             const card = document.createElement("article");
             card.className = `history-item${entry.is_current ? " current" : ""}`;
             card.innerHTML = `
-                <img class="history-thumb" src="${withCacheBust(entry.image_url, entry.timestamp)}" alt="Version ${entry.version}">
+                <img class="history-thumb" src="${withCacheBust(entry.image_url, entry.timestamp)}" alt="Version ${entry.version}" loading="lazy" decoding="async">
                 <div class="history-body">
                     <div class="history-meta">
                         <span class="history-version">${entry.operation} • v${entry.version}</span>
@@ -1084,9 +1427,35 @@ function renderSession(session) {
         });
 
     renderDiagramEditor(session);
+    clearMaskOverlay();
+    refreshMaskEditor();
     refreshModelHint();
     refreshWorkflowProfileHint();
     updateControls();
+}
+
+async function updateResultImage(imageUrl, cacheSeed) {
+    const requestId = ++state.pendingResultRequestId;
+    const nextUrl = withCacheBust(imageUrl, cacheSeed);
+
+    resultImage.style.opacity = "0.45";
+
+    try {
+        await preloadImage(nextUrl);
+        if (requestId !== state.pendingResultRequestId) {
+            return;
+        }
+        resultImage.src = nextUrl;
+        resultImage.hidden = false;
+    } catch (error) {
+        if (requestId === state.pendingResultRequestId) {
+            showError(error.message || "The result image was generated, but the browser could not load it.");
+        }
+    } finally {
+        if (requestId === state.pendingResultRequestId) {
+            resultImage.style.opacity = "";
+        }
+    }
 }
 
 function getConnectorPoints(connector, elementMap) {
@@ -1219,6 +1588,11 @@ function updateControls() {
     modelSelect.disabled = state.isBusy || state.availableModels.length === 0;
     workflowProfileSelect.disabled = state.isBusy || state.availableWorkflowProfiles.length === 0;
     processingModeSelect.disabled = state.isBusy;
+    downloadPngBtn.disabled = !state.currentSession;
+    downloadJsonBtn.disabled = !state.currentDiagramModel;
+    maskBrushSize.disabled = state.isBusy || maskPanel.classList.contains("hidden");
+    maskUndoBtn.disabled = state.isBusy || maskPanel.classList.contains("hidden") || state.maskUndoStack.length === 0;
+    maskClearBtn.disabled = state.isBusy || maskPanel.classList.contains("hidden") || !state.maskHasPaint;
     document.querySelectorAll(".history-action-btn").forEach((button) => {
         button.disabled = state.isBusy;
     });
@@ -1227,6 +1601,8 @@ function updateControls() {
     diagramDeleteBtn.disabled = state.isBusy || !state.currentDiagramModel || !state.selectedDiagramElementId;
     diagramAddBtn.disabled = state.isBusy || !state.currentDiagramModel;
     diagramExportBtn.disabled = !state.currentDiagramModel;
+    diagramExportPngBtn.disabled = !state.currentDiagramModel;
+    diagramExportJsonBtn.disabled = !state.currentDiagramModel;
     diagramToggleXmlBtn.disabled = !state.currentDiagramModel;
     [
         diagramLabelInput,

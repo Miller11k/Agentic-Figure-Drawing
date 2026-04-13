@@ -93,7 +93,11 @@
                     <p class="eyebrow session-eyebrow">Session State</p>
                     <h2 id="session-title">No active session yet</h2>
                 </div>
-                <span id="session-pill" class="session-pill muted">Idle</span>
+                <div class="session-actions">
+                    <span id="session-pill" class="session-pill muted">Idle</span>
+                    <button id="download-png-btn" class="btn btn-secondary" type="button">Download PNG</button>
+                    <button id="download-json-btn" class="btn btn-secondary" type="button">Download JSON</button>
+                </div>
             </div>
 
             <div id="result-stage" class="result-stage empty">
@@ -103,6 +107,30 @@
                     <p class="placeholder-copy">Start with a prompt-only generation or upload an image to open an editable session.</p>
                 </div>
             </div>
+
+            <section id="mask-panel" class="history-card hidden">
+                <div class="history-head">
+                    <h3>Mask Editor</h3>
+                    <span id="mask-status" class="history-count">No mask</span>
+                </div>
+                <p class="diagram-helper">
+                    Brush only over the part of the image you want the next prompt to change. Unmasked pixels will be preserved as closely as possible.
+                </p>
+                <div class="mask-toolbar">
+                    <label class="diagram-field">
+                        <span id="mask-brush-label">Brush Size: 26 px</span>
+                        <input id="mask-brush-size" type="range" min="8" max="72" value="26">
+                    </label>
+                    <button id="mask-undo-btn" class="btn btn-secondary" type="button">Undo Stroke</button>
+                    <button id="mask-clear-btn" class="btn btn-secondary" type="button">Clear Mask</button>
+                </div>
+                <div id="mask-editor" class="mask-editor">
+                    <div id="mask-stage" class="mask-stage">
+                        <img id="mask-base-image" alt="Mask editing source" hidden>
+                        <canvas id="mask-canvas"></canvas>
+                    </div>
+                </div>
+            </section>
 
             <section class="history-card">
                 <div class="history-head">
@@ -123,6 +151,8 @@
                     <div class="diagram-canvas-head">
                         <p class="diagram-helper">Drag nodes directly on the canvas. Connectors stay attached to their source and target nodes.</p>
                         <div class="diagram-canvas-actions">
+                            <button id="diagram-export-png-btn" class="btn btn-secondary" type="button">Export PNG</button>
+                            <button id="diagram-export-json-btn" class="btn btn-secondary" type="button">Export JSON</button>
                             <button id="diagram-export-btn" class="btn btn-secondary" type="button">Export XML</button>
                             <button id="diagram-toggle-xml-btn" class="btn btn-secondary" type="button">Show XML</button>
                         </div>

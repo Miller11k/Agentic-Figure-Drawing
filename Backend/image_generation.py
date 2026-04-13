@@ -22,10 +22,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(SCRIPT_DIR)
 REQUEST_TIMEOUT_SECONDS = 60
 POLL_INTERVAL_SECONDS = 1
-RENDER_TIMEOUT_SECONDS = 300
+RENDER_TIMEOUT_SECONDS = int(os.getenv("RENDER_TIMEOUT_SECONDS", "900"))
 DEFAULT_NEGATIVE_PROMPT = (
     "text, watermark, blurry, distorted, malformed anatomy, duplicate subjects, low quality, noisy"
 )
+HIDDEN_MODEL_NAMES = {
+    # Older Qwen GGUF conversion that fails with the current ComfyUI-GGUF runtime.
+    "Qwen_Image_Edit-Q2_K.gguf",
+}
 
 
 class GenerationError(RuntimeError):
@@ -152,24 +156,36 @@ def _extract_option_list(node_info: dict[str, Any], key: str) -> list[str]:
     return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
 
 
+def _visible_model_names(model_names: list[str]) -> list[str]:
+    hidden = {name.lower() for name in HIDDEN_MODEL_NAMES}
+    return [name for name in model_names if name.lower() not in hidden]
+
+
 def list_models(server_url: str | None) -> list[str]:
     data = _object_info(server_url)
     checkpoints = _extract_option_list(data.get("CheckpointLoaderSimple", {}), "ckpt_name")
     diffusion_models = _extract_option_list(data.get("UNETLoader", {}), "unet_name")
+    diffusion_models += _extract_option_list(data.get("UnetLoaderGGUF", {}), "unet_name")
+    diffusion_models += _extract_option_list(data.get("UnetLoaderGGUFAdvanced", {}), "unet_name")
     ordered_models: list[str] = []
     for model_name in [*checkpoints, *diffusion_models]:
         if model_name and model_name not in ordered_models:
             ordered_models.append(model_name)
-    return ordered_models
+    return _visible_model_names(ordered_models)
 
 
 def list_model_catalog(server_url: str | None) -> dict[str, list[str]]:
     data = _object_info(server_url)
     catalog = {
-        "checkpoints": _extract_option_list(data.get("CheckpointLoaderSimple", {}), "ckpt_name"),
-        "diffusion_models": _extract_option_list(data.get("UNETLoader", {}), "unet_name"),
-        "clip_models": _extract_option_list(data.get("CLIPLoader", {}), "clip_name"),
-        "vae_models": _extract_option_list(data.get("VAELoader", {}), "vae_name"),
+        "checkpoints": _visible_model_names(_extract_option_list(data.get("CheckpointLoaderSimple", {}), "ckpt_name")),
+        "diffusion_models": _visible_model_names(_extract_option_list(data.get("UNETLoader", {}), "unet_name")),
+        "clip_models": _visible_model_names(_extract_option_list(data.get("CLIPLoader", {}), "clip_name")),
+        "vae_models": _visible_model_names(_extract_option_list(data.get("VAELoader", {}), "vae_name")),
+        "gguf_diffusion_models": _visible_model_names(
+            _extract_option_list(data.get("UnetLoaderGGUF", {}), "unet_name")
+            or _extract_option_list(data.get("UnetLoaderGGUFAdvanced", {}), "unet_name")
+        ),
+        "gguf_clip_models": _visible_model_names(_extract_option_list(data.get("CLIPLoaderGGUF", {}), "clip_name")),
     }
     return catalog
 
@@ -303,6 +319,16 @@ def edit_image(image, prompt, mask=None, config=None) -> bytes:
     )
 
 
+def edit_with_mask(image, mask, prompt, config=None) -> bytes:
+    """Compatibility wrapper for localized edits.
+
+    The current stack keeps the mask-aware crop/blend logic in the precision-editing layer,
+    so this function delegates to the existing image edit workflow while preserving the
+    expected interface for future inpainting-specific backends.
+    """
+    return edit_image(image=image, prompt=prompt, mask=mask, config=config)
+
+
 def _prepare_workflow(
     *,
     task_type: str,
@@ -340,6 +366,8 @@ def _prepare_workflow(
         "__INPUT_IMAGE__": input_image_name or "",
         "__QWEN_CLIP__": os.getenv("QWEN_CLIP_MODEL", "qwen_2.5_vl_7b_fp8_scaled.safetensors"),
         "__QWEN_VAE__": os.getenv("QWEN_VAE_MODEL", "qwen_image_vae.safetensors"),
+        "__QWEN_GGUF_CLIP__": os.getenv("QWEN_GGUF_CLIP_MODEL", "Qwen2.5-VL-7B-Instruct-Q2_K.gguf"),
+        "__QWEN_GGUF_VAE__": os.getenv("QWEN_GGUF_VAE_MODEL", "Qwen_Image-VAE.safetensors"),
         "__WIDTH__": width if width is not None else resolved_profile.recommended_width,
         "__HEIGHT__": height if height is not None else resolved_profile.recommended_height,
         "__SEED__": final_seed,

@@ -13,6 +13,10 @@ from itertools import count
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+try:
+    import pytesseract
+except ImportError:  # pragma: no cover - optional dependency
+    pytesseract = None
 
 try:
     from .diagram_xml import parse_editable_diagram_xml, serialize_diagram_model
@@ -51,6 +55,11 @@ DIAGRAM_ELEMENT_KEYWORDS = {
     "connector": {"edge", "arrow", "connector", "connection", "line"},
     "label": {"label", "text", "caption", "title"},
 }
+TEXT_ELEMENT_TYPES = {"label", "text"}
+
+
+def _is_text_element(element: DiagramElement) -> bool:
+    return element.element_type in TEXT_ELEMENT_TYPES
 
 
 def looks_like_drawio(filename: str | None, payload: bytes) -> bool:
@@ -196,6 +205,69 @@ def refresh_diagram_metadata(
     return updated
 
 
+def diagram_model_to_structured_data(model: DiagramModel) -> dict[str, object]:
+    refreshed = refresh_diagram_metadata(model)
+    elements: list[dict[str, object]] = []
+    for element in refreshed.elements:
+        payload: dict[str, object] = {
+            "id": element.element_id,
+            "type": "text" if _is_text_element(element) else element.element_type,
+            "semantic_class": element.semantic_class,
+            "position": {"x": element.bbox.x, "y": element.bbox.y},
+            "dimensions": {"width": element.bbox.width, "height": element.bbox.height},
+            "style": {
+                "fill": element.fill_color,
+                "stroke": element.stroke_color,
+                "text": element.text_color,
+                **element.style,
+            },
+            "confidence": element.confidence,
+            "editability": element.editability,
+        }
+        if _is_text_element(element):
+            payload["content"] = element.label
+        else:
+            payload["label"] = element.label
+        if element.asset_id:
+            payload["asset_id"] = element.asset_id
+        elements.append(payload)
+
+    connectors = [
+        {
+            "id": connector.connector_id,
+            "from": connector.source_element_id,
+            "to": connector.target_element_id,
+            "type": connector.semantic_class or "arrow",
+            "label": connector.label,
+            "anchor_points": [{"x": point[0], "y": point[1]} for point in connector.anchor_points],
+            "style": {"stroke": connector.stroke_color, **connector.style},
+            "confidence": connector.confidence,
+        }
+        for connector in refreshed.connectors
+    ]
+
+    assets = [
+        {
+            "asset_id": asset.asset_id,
+            "decision": asset.decision,
+            "source_bounds": asset.source_bbox.to_dict(),
+            "mime_type": asset.mime_type,
+            "source_image_ref": asset.source_image_ref,
+            "confidence": asset.confidence,
+        }
+        for asset in refreshed.assets
+    ]
+
+    return {
+        "elements": elements,
+        "connectors": connectors,
+        "assets": assets,
+        "mode": refreshed.mode_state.to_dict() if refreshed.mode_state else None,
+        "notes": refreshed.notes,
+        "xml": refreshed.xml_representation,
+    }
+
+
 def parse_drawio_document(payload: bytes) -> DiagramModel:
     xml_text = payload.decode("utf-8", errors="ignore").strip()
     root = ET.fromstring(xml_text)
@@ -251,7 +323,7 @@ def parse_drawio_document(payload: bytes) -> DiagramModel:
             elements.append(
                 DiagramElement(
                     element_id=cell_id,
-                    element_type="label" if style.get("text") == "1" else "node",
+                    element_type="text" if style.get("text") == "1" else "node",
                     bbox=bbox,
                     label=label,
                     fill_color=style.get("fillColor", "#ffffff"),
@@ -305,18 +377,21 @@ def detect_raster_diagram(
     white_ratio = _white_ratio(rgba)
     components = _connected_components(rgba)
 
-    elements: list[DiagramElement] = []
+    elements, text_notes = _extract_text_elements(rgba)
+    text_regions = [element.bbox for element in elements if _is_text_element(element)]
     connectors: list[DiagramConnector] = []
     assets: list[ExtractedAsset] = []
     routing_metadata: list[ModelRoutingDecision] = []
     asset_counter = count(1)
     node_count = 0
     connector_count = 0
-    label_count = 0
+    label_count = len(elements)
 
     for index, component in enumerate(components):
         bbox = component["bbox"]
         if bbox.area() < 70:
+            continue
+        if any(_bbox_overlap_ratio(bbox, text_bbox) >= 0.5 for text_bbox in text_regions):
             continue
 
         fill_ratio = component["pixels"] / max(1, bbox.area())
@@ -376,13 +451,10 @@ def detect_raster_diagram(
 
         if element_type == "node":
             node_count += 1
-        if element_type == "label":
-            label_count += 1
-
         elements.append(
             DiagramElement(
                 element_id=f"element-{index}",
-                element_type=element_type,
+                element_type="text" if element_type == "label" else element_type,
                 bbox=bbox,
                 label="",
                 fill_color="#ffffff" if element_type == "node" else "#00000000",
@@ -419,6 +491,7 @@ def detect_raster_diagram(
             detection_confidence=confidence,
             routing_metadata=routing_metadata,
             notes=[
+                *text_notes,
                 "Detected a diagram-like raster image using layout and connector heuristics.",
                 "Copied image regions are preserved as draggable assets when fidelity matters more than primitive reconstruction.",
             ],
@@ -652,7 +725,7 @@ def render_diagram_model(model: DiagramModel) -> bytes:
                 asset_image = asset_image.resize((element.bbox.width, element.bbox.height))
                 image.alpha_composite(asset_image, (x1, y1))
                 draw.rounded_rectangle((x1, y1, x2, y2), radius=12, outline=element.stroke_color, width=2)
-        elif element.element_type == "label":
+        elif _is_text_element(element):
             draw.text((x1, y1), element.label, fill=element.text_color, font=font)
         else:
             if element.style.get("shape") in {"ellipse", "circle"}:
@@ -666,7 +739,7 @@ def render_diagram_model(model: DiagramModel) -> bytes:
                     width=3,
                 )
 
-        if element.label and element.element_type != "label":
+        if element.label and not _is_text_element(element):
             draw.multiline_text((x1 + 10, y1 + 10), element.label, fill=element.text_color, font=font, spacing=4)
 
     buffer = io.BytesIO()
@@ -859,6 +932,99 @@ def _route_component(crop: Image.Image, element_type: str, bbox: BoundingBox, fi
     }
 
 
+def _extract_text_elements(image: Image.Image) -> tuple[list[DiagramElement], list[str]]:
+    if pytesseract is None:
+        return [], ["OCR is unavailable in this runtime, so raster text may remain image-backed instead of fully extracted."]
+
+    try:
+        ocr_data = pytesseract.image_to_data(
+            image.convert("RGB"),
+            output_type=pytesseract.Output.DICT,
+            config="--psm 6",
+        )
+    except Exception:
+        return [], ["Raster OCR failed, so the parser fell back to non-text component segmentation."]
+
+    grouped: dict[tuple[int, int, int], dict[str, object]] = {}
+    for index, raw_text in enumerate(ocr_data.get("text", [])):
+        text = (raw_text or "").strip()
+        confidence_text = str(ocr_data.get("conf", ["-1"])[index]).strip()
+        try:
+            confidence = float(confidence_text)
+        except ValueError:
+            confidence = -1.0
+        if not text or confidence < 0:
+            continue
+
+        left = int(ocr_data.get("left", [0])[index])
+        top = int(ocr_data.get("top", [0])[index])
+        width = int(ocr_data.get("width", [0])[index])
+        height = int(ocr_data.get("height", [0])[index])
+        if width <= 2 or height <= 2:
+            continue
+
+        key = (
+            int(ocr_data.get("block_num", [0])[index]),
+            int(ocr_data.get("par_num", [0])[index]),
+            int(ocr_data.get("line_num", [0])[index]),
+        )
+        group = grouped.setdefault(
+            key,
+            {
+                "tokens": [],
+                "bbox": BoundingBox(left, top, width, height),
+                "confidence_values": [],
+            },
+        )
+        group["tokens"].append(text)
+        bbox = group["bbox"]
+        x1 = min(bbox.x, left)
+        y1 = min(bbox.y, top)
+        x2 = max(bbox.x + bbox.width, left + width)
+        y2 = max(bbox.y + bbox.height, top + height)
+        group["bbox"] = BoundingBox(x1, y1, x2 - x1, y2 - y1)
+        group["confidence_values"].append(confidence)
+
+    elements: list[DiagramElement] = []
+    for index, group in enumerate(grouped.values(), start=1):
+        text = " ".join(token for token in group["tokens"] if token).strip()
+        if not text:
+            continue
+        bbox = group["bbox"]
+        confidence_values = group["confidence_values"] or [75.0]
+        elements.append(
+            DiagramElement(
+                element_id=f"text-{index:03d}",
+                element_type="text",
+                bbox=bbox,
+                label=text,
+                fill_color="#00000000",
+                stroke_color="#00000000",
+                text_color="#1f2b24",
+                style={"shape": "text_box", "source": "ocr"},
+                semantic_class="text_label",
+                editability=["move", "label", "style"],
+                confidence=min(0.99, max(0.45, sum(confidence_values) / (len(confidence_values) * 100.0))),
+                z_index=50,
+            )
+        )
+
+    if elements:
+        return elements, ["Extracted raster text into editable text boxes using OCR."]
+    return [], ["No raster text was confidently extracted from the diagram image."]
+
+
+def _bbox_overlap_ratio(left: BoundingBox, right: BoundingBox) -> float:
+    overlap_x1 = max(left.x, right.x)
+    overlap_y1 = max(left.y, right.y)
+    overlap_x2 = min(left.x + left.width, right.x + right.width)
+    overlap_y2 = min(left.y + left.height, right.y + right.height)
+    if overlap_x2 <= overlap_x1 or overlap_y2 <= overlap_y1:
+        return 0.0
+    overlap_area = (overlap_x2 - overlap_x1) * (overlap_y2 - overlap_y1)
+    return overlap_area / max(1, min(left.area(), right.area()))
+
+
 def _semantic_class_for_component(element_type: str, bbox: BoundingBox, crop: Image.Image) -> str:
     if element_type == "connector":
         return "arrow"
@@ -899,9 +1065,9 @@ def _match_diagram_targets(
             return [], connectors
 
     if any(keyword in target_lower for keyword in DIAGRAM_ELEMENT_KEYWORDS["label"]):
-        elements = [element for element in elements if element.element_type == "label"] or elements
+        elements = [element for element in elements if _is_text_element(element)] or elements
     elif any(keyword in target_lower for keyword in DIAGRAM_ELEMENT_KEYWORDS["node"]):
-        elements = [element for element in elements if element.element_type != "label"] or elements
+        elements = [element for element in elements if not _is_text_element(element)] or elements
 
     if intent.referenced_labels:
         label_matches = [
@@ -1059,7 +1225,7 @@ def _connector_points_from_bbox(bbox: BoundingBox) -> list[tuple[int, int]]:
 
 
 def _link_connectors(elements: list[DiagramElement], connectors: list[DiagramConnector]) -> list[DiagramConnector]:
-    nodes = [element for element in elements if element.element_type != "label"]
+    nodes = [element for element in elements if not _is_text_element(element)]
     if len(nodes) < 2:
         return connectors
     for connector in connectors:
@@ -1073,12 +1239,32 @@ def _link_connectors(elements: list[DiagramElement], connectors: list[DiagramCon
         target = min(target_candidates, key=lambda element: _distance(end, element.bbox.center()))
         connector.source_element_id = source.element_id
         connector.target_element_id = target.element_id
-        connector.anchor_points = [tuple(map(int, source.bbox.center())), tuple(map(int, target.bbox.center()))]
+        source_anchor = _anchor_point_towards(source.bbox, target.bbox.center())
+        target_anchor = _anchor_point_towards(target.bbox, source.bbox.center())
+        if len(points) > 2:
+            connector.anchor_points = [source_anchor, *points[1:-1], target_anchor]
+        else:
+            connector.anchor_points = [source_anchor, target_anchor]
     return connectors
 
 
 def _distance(point: tuple[int, int] | tuple[float, float], center: tuple[float, float]) -> float:
     return ((point[0] - center[0]) ** 2 + (point[1] - center[1]) ** 2) ** 0.5
+
+
+def _anchor_point_towards(bbox: BoundingBox, target_center: tuple[float, float]) -> tuple[int, int]:
+    center_x, center_y = bbox.center()
+    dx = target_center[0] - center_x
+    dy = target_center[1] - center_y
+    if abs(dx) >= abs(dy):
+        return (
+            int(bbox.x + bbox.width if dx >= 0 else bbox.x),
+            int(center_y),
+        )
+    return (
+        int(center_x),
+        int(bbox.y + bbox.height if dy >= 0 else bbox.y),
+    )
 
 
 def _build_image_backed_diagram(image: Image.Image, source_image_ref: str) -> DiagramModel:
@@ -1138,9 +1324,10 @@ def _infer_mode_from_model(model: DiagramModel) -> str:
 
 
 def _maybe_refine_asset(crop: Image.Image, generation_backend: GenerationBackend, model_name: str) -> Image.Image:
+    resolved_model_name = _resolve_runtime_asset_model_name(model_name)
     request = GenerationRequest(
         prompt_text="Clean isolated diagram asset, preserve silhouette and colors, plain background.",
-        model_name=model_name,
+        model_name=resolved_model_name,
         input_image=_image_to_png_bytes(crop),
         denoise=0.35,
         steps=16,
@@ -1152,6 +1339,20 @@ def _maybe_refine_asset(crop: Image.Image, generation_backend: GenerationBackend
         return Image.open(io.BytesIO(refined)).convert("RGBA")
     except Exception:
         return crop
+
+
+def _resolve_runtime_asset_model_name(model_name: str | None) -> str | None:
+    candidate = (model_name or "").strip().lower()
+    if not candidate:
+        return None
+    if candidate in {
+        "diagram-cleanup-backend",
+        "connector-reconstruction",
+        "shape-reconstruction",
+        "preserve-source",
+    }:
+        return None
+    return model_name
 
 
 def _image_to_data_url(image: Image.Image) -> str:

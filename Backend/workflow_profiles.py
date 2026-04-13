@@ -151,6 +151,21 @@ PROFILES: dict[str, WorkflowProfile] = {
         recommended_sampler="euler",
         recommended_scheduler="simple",
     ),
+    "qwen-image-edit-gguf": WorkflowProfile(
+        name="qwen-image-edit-gguf",
+        label="Qwen Image Edit GGUF",
+        family="qwen-image-edit-gguf",
+        description="Quantized local Qwen Image Edit workflow for lower-VRAM laptops using ComfyUI-GGUF.",
+        image_template=WORKFLOWS_DIR / "workflow_image_to_image_qwen_image_edit_gguf.json",
+        env_image_template="WORKFLOW_TEMPLATE_IMAGE_EDIT_QWEN_IMAGE_EDIT_GGUF",
+        supports_text=False,
+        recommended_width=768,
+        recommended_height=768,
+        recommended_cfg=2.5,
+        recommended_steps=8,
+        recommended_sampler="euler",
+        recommended_scheduler="simple",
+    ),
 }
 
 
@@ -211,6 +226,8 @@ def detect_profile_from_model_name(model_name: str | None, task_type: str) -> st
 
     if "kontext" in name:
         return "flux-kontext"
+    if "qwen" in name and "gguf" in name and "edit" in name:
+        return "qwen-image-edit-gguf"
     if "qwen" in name and "edit" in name:
         return "qwen-image-edit"
     if "qwen" in name:

@@ -9,10 +9,13 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from Backend.app import create_app
-from Backend.editing_models import EditingAnalysis, PrecisionEditResult, RegionSelection
+from Backend.editing_models import EditingAnalysis, MaskMetadata, PrecisionEditResult, RegionSelection
+from Backend.generation_backend import GenerationRequest
 from Backend.precision_editing import analyze_edit_request
+from Backend.precision_editing import perform_precise_edit
 from Backend.prompt_parser import parse_edit_intent
 from Backend.session_store import FileSessionStore
+from Backend.workflow_profiles import resolve_workflow_profile
 
 
 def make_png_bytes(color: str) -> bytes:
@@ -26,12 +29,24 @@ def make_drawio_bytes() -> bytes:
     return b"""<mxfile host="app.diagrams.net"><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="box1" value="Start" style="rounded=1;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell><mxCell id="box2" value="End" style="rounded=1;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="1"><mxGeometry x="260" y="40" width="120" height="60" as="geometry"/></mxCell><mxCell id="edge1" value="" style="strokeColor=#000000;" edge="1" parent="1" source="box1" target="box2"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>"""
 
 
-def make_precision_result(color: str, prompt: str = "edit prompt") -> PrecisionEditResult:
+def make_precision_result(
+    color: str,
+    prompt: str = "edit prompt",
+    *,
+    mask_used: bool = False,
+) -> PrecisionEditResult:
     analysis = EditingAnalysis(
         content_mode="image",
         edit_intent=parse_edit_intent(prompt),
         region_selection=RegionSelection(),
         diagram_model=None,
+        mask_metadata=MaskMetadata(
+            used=mask_used,
+            source="user_brush" if mask_used else "auto",
+            mask_type="hard" if mask_used else "full",
+            width=8,
+            height=8,
+        ),
         warnings=[],
     )
     return PrecisionEditResult(image_bytes=make_png_bytes(color), analysis=analysis)
@@ -44,13 +59,16 @@ def make_backend(generate_color: str = "red", edit_color: str = "blue") -> Mock:
     backend.list_model_catalog.return_value = {
         "checkpoints": ["dreamshaper_8.safetensors", "alt-model.safetensors"],
         "diffusion_models": ["flux1-dev.safetensors"],
+        "gguf_diffusion_models": ["Qwen_Image_Edit-Q2_K.gguf"],
         "clip_models": ["t5xxl_fp16.safetensors"],
+        "gguf_clip_models": ["Qwen2.5-VL-7B-Instruct-Q2_K.gguf"],
         "vae_models": ["ae.safetensors"],
     }
     backend.list_workflow_profiles.return_value = [
         {"name": "legacy", "label": "SD 1.x / checkpoint-compatible", "description": "legacy"},
         {"name": "sdxl", "label": "SDXL", "description": "sdxl"},
         {"name": "flux-kontext", "label": "FLUX Kontext", "description": "edit"},
+        {"name": "qwen-image-edit-gguf", "label": "Qwen Image Edit GGUF", "description": "low-vram qwen edit"},
     ]
     backend.resolve_model.side_effect = (
         lambda requested_model, task_type: requested_model or "dreamshaper_8.safetensors"
@@ -170,9 +188,11 @@ class EditableApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
-        self.assertEqual(payload["current_index"], 0)
+        self.assertEqual(payload["current_index"], 1)
+        self.assertEqual(len(payload["edit_history"]), 2)
         self.assertEqual(payload["edit_history"][0]["source"], "upload")
-        self.assertEqual(payload["edit_history"][0]["operation"], "edit")
+        self.assertEqual(payload["edit_history"][0]["operation"], "original")
+        self.assertEqual(payload["edit_history"][1]["operation"], "edit")
 
     def test_edit_existing_session_appends_history(self):
         backend = make_backend(generate_color="red")
@@ -204,6 +224,131 @@ class EditableApiTests(unittest.TestCase):
         self.assertEqual(history_response.status_code, 200, history_response.text)
         history_payload = history_response.json()
         self.assertEqual(len(history_payload["edit_history"]), 2)
+
+    def test_edit_with_mask_persists_mask_metadata(self):
+        backend = make_backend(generate_color="red")
+        with patch("Backend.app._generation_backend", return_value=backend):
+            generated = self.client.post(
+                "/generate",
+                data={"prompt_text": "A ceramic teapot", "model_name": "test-model"},
+            ).json()
+
+        with patch("Backend.app._generation_backend", return_value=backend):
+            with patch(
+                "Backend.app.perform_precise_edit",
+                return_value=make_precision_result("green", "Add a gold handle", mask_used=True),
+            ):
+                response = self.client.post(
+                    "/edit",
+                    data={
+                        "session_id": generated["session_id"],
+                        "prompt_text": "Add a gold handle",
+                        "model_name": "test-model",
+                    },
+                    files={"mask_image": ("mask.png", make_png_bytes("white"), "image/png")},
+                )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["current_mask_metadata"]["used"])
+        self.assertEqual(payload["current_mask_metadata"]["source"], "user_brush")
+        self.assertIn("mask_image_url", payload["current_mask_metadata"])
+        self.assertTrue(payload["current_mask_metadata"]["mask_image_url"].endswith(".png"))
+
+    def test_edit_with_mask_uses_asset_refine_routing(self):
+        backend = make_backend(generate_color="red")
+        backend.resolve_task_execution.side_effect = (
+            lambda requested_model, requested_profile, task_type: (
+                requested_model or ("sd_xl_base_1.0.safetensors" if task_type == "asset_refine" else "flux1-schnell-fp8.safetensors"),
+                requested_profile or ("sdxl" if task_type == "asset_refine" else "flux"),
+            )
+        )
+        with patch("Backend.app._generation_backend", return_value=backend):
+            generated = self.client.post(
+                "/generate",
+                data={"prompt_text": "A ceramic teapot", "model_name": "test-model"},
+            ).json()
+
+        with patch("Backend.app._generation_backend", return_value=backend):
+            with patch(
+                "Backend.app.perform_precise_edit",
+                return_value=make_precision_result("green", "Add a gold handle", mask_used=True),
+            ):
+                response = self.client.post(
+                    "/edit",
+                    data={
+                        "session_id": generated["session_id"],
+                        "prompt_text": "Add a gold handle",
+                    },
+                    files={"mask_image": ("mask.png", make_png_bytes("white"), "image/png")},
+                )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        routed_model, routed_profile, routed_task = backend.resolve_task_execution.call_args.args
+        self.assertIsNone(routed_model)
+        self.assertIsNone(routed_profile)
+        self.assertEqual(routed_task, "asset_refine")
+
+    def test_edit_with_mask_upgrades_flux_session_to_refine_defaults(self):
+        backend = make_backend(generate_color="red")
+        backend.resolve_task_execution.side_effect = (
+            lambda requested_model, requested_profile, task_type: (
+                requested_model or ("sd_xl_base_1.0.safetensors" if task_type == "asset_refine" else "flux1-schnell-fp8.safetensors"),
+                requested_profile or ("sdxl" if task_type == "asset_refine" else "flux"),
+            )
+        )
+        with patch("Backend.app._generation_backend", return_value=backend):
+            generated = self.client.post(
+                "/generate",
+                data={"prompt_text": "A ceramic teapot", "model_name": "flux1-schnell-fp8.safetensors", "workflow_profile": "flux"},
+            ).json()
+
+        with patch("Backend.app._generation_backend", return_value=backend):
+            with patch(
+                "Backend.app.perform_precise_edit",
+                return_value=make_precision_result("green", "Add a gold handle", mask_used=True),
+            ):
+                response = self.client.post(
+                    "/edit",
+                    data={
+                        "session_id": generated["session_id"],
+                        "prompt_text": "Add a gold handle",
+                        "model_name": "flux1-schnell-fp8.safetensors",
+                        "workflow_profile": "flux",
+                    },
+                    files={"mask_image": ("mask.png", make_png_bytes("white"), "image/png")},
+                )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        routed_model, routed_profile, routed_task = backend.resolve_task_execution.call_args.args
+        self.assertIsNone(routed_model)
+        self.assertIsNone(routed_profile)
+        self.assertEqual(routed_task, "asset_refine")
+
+    def test_upload_edit_history_can_revert_to_original_image(self):
+        backend = make_backend()
+        with patch("Backend.app._generation_backend", return_value=backend):
+            with patch(
+                "Backend.app.perform_precise_edit",
+                return_value=make_precision_result("green", "Add a hat"),
+            ):
+                created = self.client.post(
+                    "/edit",
+                    data={"prompt_text": "Add a hat", "model_name": "test-model"},
+                    files={"input_image": ("input.png", make_png_bytes("gray"), "image/png")},
+                ).json()
+
+        self.assertEqual(created["current_index"], 1)
+        self.assertEqual(created["edit_history"][0]["operation"], "original")
+
+        reverted = self.client.post(
+            "/revert",
+            json={"session_id": created["session_id"], "version": 0},
+        )
+        self.assertEqual(reverted.status_code, 200, reverted.text)
+        payload = reverted.json()
+        self.assertEqual(payload["current_index"], 0)
+        self.assertEqual(payload["current_entry"]["operation"], "original")
 
     def test_undo_rolls_back_to_previous_image(self):
         backend = make_backend(generate_color="red")
@@ -242,9 +387,27 @@ class EditableApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["content_mode"], "diagram")
         self.assertIsNotNone(payload["current_diagram_model"])
+        self.assertIsNotNone(payload["current_diagram_structure"])
         self.assertGreaterEqual(len(payload["current_diagram_model"]["elements"]), 2)
+        self.assertGreaterEqual(len(payload["current_diagram_structure"]["elements"]), 2)
         self.assertGreaterEqual(len(payload["current_diagram_model"]["connectors"]), 1)
+        self.assertEqual(payload["current_diagram_model"]["connectors"][0]["source_element_id"], "box1")
+        self.assertEqual(payload["current_diagram_model"]["connectors"][0]["target_element_id"], "box2")
         self.assertIn("<editable-diagram", payload["current_diagram_xml"])
+
+    def test_diagram_json_endpoint_returns_structured_payload(self):
+        with patch("Backend.app._generation_backend", return_value=make_backend()):
+            imported = self.client.post(
+                "/diagram/import",
+                files={"diagram_file": ("diagram.drawio", make_drawio_bytes(), "application/xml")},
+            ).json()
+
+        response = self.client.get(f"/diagram/json/{imported['session_id']}")
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertIn("elements", payload)
+        self.assertIn("connectors", payload)
+        self.assertGreaterEqual(len(payload["elements"]), 2)
 
     def test_diagram_edit_updates_element_label(self):
         with patch("Backend.app._generation_backend", return_value=make_backend()):
@@ -363,6 +526,45 @@ class EditableApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.headers["content-type"], "image/png")
         self.assertGreater(len(response.content), 0)
+
+    def test_precise_edit_forwards_explicit_workflow_profile(self):
+        backend = Mock()
+        backend.edit.return_value = make_png_bytes("blue")
+        with patch("Backend.precision_editing.get_generation_backend", return_value=backend):
+            perform_precise_edit(
+                make_png_bytes("white"),
+                "Change the shirt to red",
+                model_name="Qwen_Image_Edit-Q2_K.gguf",
+                workflow_profile="qwen-image-edit-gguf",
+                server_url="http://localhost:8188",
+            )
+
+        first_request = backend.edit.call_args_list[0].args[0]
+        self.assertIsInstance(first_request, GenerationRequest)
+        self.assertEqual(first_request.workflow_profile, "qwen-image-edit-gguf")
+
+    def test_precise_edit_uses_asset_refine_task_for_explicit_mask(self):
+        backend = Mock()
+        backend.edit.return_value = make_png_bytes("blue")
+        with patch("Backend.precision_editing.get_generation_backend", return_value=backend):
+            perform_precise_edit(
+                make_png_bytes("white"),
+                "Change the shirt to red",
+                model_name="sd_xl_base_1.0.safetensors",
+                workflow_profile=resolve_workflow_profile(
+                    "asset_refine",
+                    model_name="sd_xl_base_1.0.safetensors",
+                ).name,
+                server_url="http://localhost:8188",
+                mask_image_bytes=make_png_bytes("white"),
+            )
+
+        first_request = backend.edit.call_args_list[0].args[0]
+        self.assertIsInstance(first_request, GenerationRequest)
+        self.assertEqual(first_request.task_type, "asset_refine")
+        self.assertLessEqual(first_request.denoise, 0.32)
+        self.assertIsNotNone(first_request.input_image)
+        self.assertGreaterEqual(len(first_request.input_image), 1)
 
 
 if __name__ == "__main__":

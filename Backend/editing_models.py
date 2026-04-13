@@ -136,6 +136,48 @@ class RegionSelection:
 
 
 @dataclass
+class MaskMetadata:
+    used: bool = False
+    source: str = "auto"
+    mask_type: MaskType = "full"
+    regions: list[BoundingBox] = field(default_factory=list)
+    coverage_ratio: float = 0.0
+    width: int = 0
+    height: int = 0
+    mask_image_filename: Optional[str] = None
+    mask_image_url: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "used": self.used,
+            "source": self.source,
+            "mask_type": self.mask_type,
+            "regions": [region.to_dict() for region in self.regions],
+            "coverage_ratio": self.coverage_ratio,
+            "width": self.width,
+            "height": self.height,
+            "mask_image_filename": self.mask_image_filename,
+            "mask_image_url": self.mask_image_url,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Optional[dict]) -> "MaskMetadata":
+        if not payload:
+            return cls()
+        return cls(
+            used=bool(payload.get("used", False)),
+            source=payload.get("source", "auto"),
+            mask_type=payload.get("mask_type", "full"),
+            regions=[BoundingBox.from_dict(region) for region in payload.get("regions", [])],
+            coverage_ratio=float(payload.get("coverage_ratio", 0.0)),
+            width=int(payload.get("width", 0)),
+            height=int(payload.get("height", 0)),
+            mask_image_filename=payload.get("mask_image_filename"),
+            mask_image_url=payload.get("mask_image_url"),
+        )
+
+
+@dataclass
 class ExtractedAsset:
     asset_id: str
     source_bbox: BoundingBox
@@ -363,6 +405,7 @@ class EditingAnalysis:
     region_selection: RegionSelection
     diagram_model: Optional[DiagramModel] = None
     mode_state: Optional[ModeState] = None
+    mask_metadata: Optional[MaskMetadata] = None
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -372,6 +415,7 @@ class EditingAnalysis:
             "region_selection": self.region_selection.to_dict(),
             "diagram_model": self.diagram_model.to_dict() if self.diagram_model else None,
             "mode_state": self.mode_state.to_dict() if self.mode_state else None,
+            "mask_metadata": self.mask_metadata.to_dict() if self.mask_metadata else None,
             "warnings": self.warnings,
         }
 
@@ -385,6 +429,7 @@ class EditingAnalysis:
             region_selection=RegionSelection.from_dict(payload.get("region_selection", {})),
             diagram_model=DiagramModel.from_dict(diagram_payload) if diagram_payload else None,
             mode_state=ModeState.from_dict(mode_state) if mode_state else None,
+            mask_metadata=MaskMetadata.from_dict(payload.get("mask_metadata")),
             warnings=list(payload.get("warnings", [])),
         )
 

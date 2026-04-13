@@ -13,7 +13,15 @@ try:
         render_diagram_model,
         select_diagram_regions,
     )
-    from .editing_models import BoundingBox, DiagramModel, EditingAnalysis, PrecisionEditResult, RegionSelection, SelectedRegion
+    from .editing_models import (
+        BoundingBox,
+        DiagramModel,
+        EditingAnalysis,
+        MaskMetadata,
+        PrecisionEditResult,
+        RegionSelection,
+        SelectedRegion,
+    )
     from .generation_backend import GenerationRequest, get_generation_backend
     from .prompt_parser import parse_edit_intent
 except ImportError:
@@ -24,7 +32,15 @@ except ImportError:
         render_diagram_model,
         select_diagram_regions,
     )
-    from editing_models import BoundingBox, DiagramModel, EditingAnalysis, PrecisionEditResult, RegionSelection, SelectedRegion
+    from editing_models import (
+        BoundingBox,
+        DiagramModel,
+        EditingAnalysis,
+        MaskMetadata,
+        PrecisionEditResult,
+        RegionSelection,
+        SelectedRegion,
+    )
     from generation_backend import GenerationRequest, get_generation_backend
     from prompt_parser import parse_edit_intent
 
@@ -48,6 +64,8 @@ SEMANTIC_REGION_HINTS = {
 }
 
 HARD_MASK_TARGETS = {"watermark", "logo", "text", "label", "caption", "connector", "arrow", "edge", "node", "box"}
+MIN_MASK_CONTEXT_SIZE = 384
+MIN_AUTO_CONTEXT_SIZE = 256
 
 
 def analyze_edit_request(
@@ -76,6 +94,7 @@ def analyze_edit_request(
             region_selection=select_diagram_regions(diagram_model, intent),
             diagram_model=diagram_model,
             mode_state=diagram_model.mode_state,
+            mask_metadata=MaskMetadata(),
             warnings=list(diagram_model.notes),
         )
 
@@ -86,6 +105,13 @@ def analyze_edit_request(
         region_selection=select_image_regions(image, intent),
         diagram_model=None,
         mode_state=None,
+        mask_metadata=MaskMetadata(
+            used=False,
+            source="auto",
+            mask_type="full",
+            width=image.width,
+            height=image.height,
+        ),
         warnings=[],
     )
 
@@ -95,10 +121,12 @@ def perform_precise_edit(
     prompt_text: str,
     *,
     model_name: str,
+    workflow_profile: Optional[str] = None,
     server_url: str,
     filename: Optional[str] = None,
     existing_diagram_model: Optional[DiagramModel] = None,
     mode_override: Optional[str] = None,
+    mask_image_bytes: Optional[bytes] = None,
     seed: Optional[int] = None,
     steps: int = 20,
     cfg: float = 8.0,
@@ -119,6 +147,14 @@ def perform_precise_edit(
         updated_model, selection = apply_prompt_to_diagram_model(analysis.diagram_model, analysis.edit_intent)
         analysis.region_selection = selection
         analysis.mode_state = updated_model.mode_state
+        analysis.mask_metadata = MaskMetadata(
+            used=False,
+            source="diagram",
+            mask_type="element",
+            regions=[region.bbox for region in selection.regions],
+            width=updated_model.width,
+            height=updated_model.height,
+        )
 
         if updated_model != analysis.diagram_model and (
             analysis.content_mode == "diagram" or selection.affected_element_ids
@@ -129,12 +165,32 @@ def perform_precise_edit(
                 analysis=analysis,
             )
 
+    explicit_mask = None
+    if mask_image_bytes and analysis.content_mode == "image":
+        explicit_mask, masked_selection, mask_metadata = _load_explicit_mask(mask_image_bytes, image_bytes)
+        if mask_metadata.used:
+            analysis.region_selection = masked_selection
+            analysis.mask_metadata = mask_metadata
+            analysis.warnings.append("Applied a user-defined binary mask to keep the edit localized.")
+    elif analysis.content_mode == "image":
+        base_image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        analysis.mask_metadata = MaskMetadata(
+            used=False,
+            source="auto",
+            mask_type=analysis.region_selection.mask_type,
+            regions=[region.bbox for region in analysis.region_selection.regions],
+            width=base_image.width,
+            height=base_image.height,
+        )
+
     edited_bytes = _localized_image_edit(
         image_bytes=image_bytes,
         prompt_text=prompt_text,
         analysis=analysis,
         model_name=model_name,
+        workflow_profile=workflow_profile,
         server_url=server_url,
+        mask_image=explicit_mask,
         seed=seed,
         steps=steps,
         cfg=cfg,
@@ -178,7 +234,9 @@ def _localized_image_edit(
     prompt_text: str,
     analysis: EditingAnalysis,
     model_name: str,
+    workflow_profile: Optional[str],
     server_url: str,
+    mask_image: Optional[Image.Image],
     seed: Optional[int],
     steps: int,
     cfg: float,
@@ -194,6 +252,7 @@ def _localized_image_edit(
                 model_name=model_name,
                 prompt_text=_local_edit_prompt(prompt_text, analysis),
                 input_image=image_bytes,
+                workflow_profile=workflow_profile,
                 seed=seed,
                 steps=steps,
                 cfg=cfg,
@@ -213,10 +272,16 @@ def _localized_image_edit(
 
     original = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     working = original.copy()
+    uses_explicit_mask = mask_image is not None
+    generation_task_type = "asset_refine" if uses_explicit_mask else "image_edit"
 
     for region in selection.regions:
-        padding = max(16, int(min(region.bbox.width, region.bbox.height) * 0.18))
-        crop_bbox = region.bbox.expanded(padding, original.width, original.height)
+        crop_bbox = _build_context_crop(
+            region.bbox,
+            original.width,
+            original.height,
+            prefer_large_context=uses_explicit_mask,
+        )
         crop = working.crop(
             (
                 crop_bbox.x,
@@ -232,20 +297,73 @@ def _localized_image_edit(
                 model_name=model_name,
                 prompt_text=_local_edit_prompt(prompt_text, analysis),
                 input_image=crop_bytes,
+                workflow_profile=workflow_profile,
                 seed=seed,
                 steps=steps,
                 cfg=cfg,
                 sampler=sampler,
                 scheduler=scheduler,
-                denoise=min(denoise, 0.55 if selection.mask_type == "soft" else denoise),
-                task_type="image_edit",
+                denoise=_effective_local_denoise(
+                    denoise,
+                    selection.mask_type,
+                    explicit_mask=uses_explicit_mask,
+                ),
+                task_type=generation_task_type,
             )
         )
         edited_crop = Image.open(io.BytesIO(edited_crop_bytes)).convert("RGBA").resize(crop.size)
-        mask = _build_blend_mask(crop.size, selection.mask_type)
+        mask = _build_blend_mask(
+            crop.size,
+            selection.mask_type,
+            source_mask=(
+                mask_image.crop(
+                    (
+                        crop_bbox.x,
+                        crop_bbox.y,
+                        crop_bbox.x + crop_bbox.width,
+                        crop_bbox.y + crop_bbox.height,
+                    )
+                )
+                if mask_image is not None
+                else None
+            ),
+        )
         working.paste(edited_crop, (crop_bbox.x, crop_bbox.y), mask)
 
     return _image_to_png_bytes(working)
+
+
+def _build_context_crop(
+    bbox: BoundingBox,
+    image_width: int,
+    image_height: int,
+    *,
+    prefer_large_context: bool,
+) -> BoundingBox:
+    base_padding = max(24, int(min(bbox.width, bbox.height) * (0.30 if prefer_large_context else 0.18)))
+    expanded = bbox.expanded(base_padding, image_width, image_height)
+    minimum_size = MIN_MASK_CONTEXT_SIZE if prefer_large_context else MIN_AUTO_CONTEXT_SIZE
+
+    if expanded.width >= minimum_size and expanded.height >= minimum_size:
+        return expanded
+
+    center_x, center_y = bbox.center()
+    target_width = min(image_width, max(expanded.width, minimum_size))
+    target_height = min(image_height, max(expanded.height, minimum_size))
+
+    left = int(round(center_x - (target_width / 2.0)))
+    top = int(round(center_y - (target_height / 2.0)))
+    left = max(0, min(left, image_width - target_width))
+    top = max(0, min(top, image_height - target_height))
+    return BoundingBox(left, top, target_width, target_height)
+
+
+def _effective_local_denoise(denoise: float, mask_type: str, *, explicit_mask: bool) -> float:
+    if explicit_mask:
+        return min(max(denoise, 0.18), 0.32)
+    if mask_type == "soft":
+        return min(denoise, 0.55)
+    return denoise
 
 
 def _local_edit_prompt(prompt_text: str, analysis: EditingAnalysis) -> str:
@@ -296,7 +414,69 @@ def _apply_spatial_qualifiers(
     return candidate
 
 
-def _build_blend_mask(size: tuple[int, int], mask_type: str) -> Image.Image:
+def _load_explicit_mask(mask_image_bytes: bytes, base_image_bytes: bytes) -> tuple[Image.Image, RegionSelection, MaskMetadata]:
+    base_image = Image.open(io.BytesIO(base_image_bytes)).convert("RGBA")
+    mask_image = Image.open(io.BytesIO(mask_image_bytes)).convert("L")
+    if mask_image.size != base_image.size:
+        mask_image = mask_image.resize(base_image.size)
+
+    binary_mask = mask_image.point(lambda pixel: 255 if pixel >= 24 else 0)
+    mask_bbox = binary_mask.getbbox()
+    coverage_ratio = binary_mask.histogram()[255] / max(1, base_image.width * base_image.height)
+
+    if mask_bbox is None or coverage_ratio <= 0.0:
+        metadata = MaskMetadata(
+            used=False,
+            source="user_brush",
+            mask_type="hard",
+            width=base_image.width,
+            height=base_image.height,
+        )
+        return binary_mask, RegionSelection(rationale="User mask was empty.", mask_type="hard"), metadata
+
+    bbox = BoundingBox(
+        x=int(mask_bbox[0]),
+        y=int(mask_bbox[1]),
+        width=max(1, int(mask_bbox[2] - mask_bbox[0])),
+        height=max(1, int(mask_bbox[3] - mask_bbox[1])),
+    )
+    selection = RegionSelection(
+        regions=[
+            SelectedRegion(
+                bbox=bbox,
+                confidence=0.99,
+                mask_type="hard",
+                reason="Used the user-painted mask as the exact edit region.",
+            )
+        ],
+        confidence=0.99,
+        mask_type="hard",
+        rationale="User-defined mask overrides heuristic region selection for localized editing.",
+    )
+    metadata = MaskMetadata(
+        used=True,
+        source="user_brush",
+        mask_type="hard",
+        regions=[bbox],
+        coverage_ratio=coverage_ratio,
+        width=base_image.width,
+        height=base_image.height,
+    )
+    return binary_mask, selection, metadata
+
+
+def _build_blend_mask(
+    size: tuple[int, int],
+    mask_type: str,
+    *,
+    source_mask: Optional[Image.Image] = None,
+) -> Image.Image:
+    if source_mask is not None:
+        mask = source_mask.convert("L").resize(size)
+        if mask_type == "hard":
+            return mask.point(lambda pixel: 255 if pixel >= 24 else 0)
+        return mask.filter(ImageFilter.GaussianBlur(radius=max(4, min(size) // 18)))
+
     if mask_type == "hard":
         return Image.new("L", size, 255)
 

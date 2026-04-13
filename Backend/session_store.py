@@ -129,6 +129,46 @@ class FileSessionStore:
         self._write_session(session)
         return session
 
+    def write_entry_image_asset(
+        self,
+        session_id: str,
+        version: int,
+        *,
+        suffix: str,
+        image_bytes: bytes,
+    ) -> str:
+        session = self.get_session(session_id)
+        entry = next((candidate for candidate in session["edit_history"] if candidate["version"] == version), None)
+        if entry is None:
+            raise HistoryVersionNotFoundError(
+                f"Version '{version}' was not found for session '{session_id}'."
+            )
+
+        base_name = Path(entry["image_filename"]).stem
+        filename = f"{base_name}.{suffix}.png"
+        self._write_image(self._session_dir(session_id) / filename, self._to_png_bytes(image_bytes))
+        return filename
+
+    def update_entry_parameters(
+        self,
+        session_id: str,
+        version: int,
+        parameter_patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        entry = next((candidate for candidate in session["edit_history"] if candidate["version"] == version), None)
+        if entry is None:
+            raise HistoryVersionNotFoundError(
+                f"Version '{version}' was not found for session '{session_id}'."
+            )
+
+        current_parameters = dict(entry.get("parameters", {}))
+        current_parameters.update(parameter_patch)
+        entry["parameters"] = current_parameters
+        session["updated_at"] = _utc_now()
+        self._write_session(session)
+        return session
+
     def undo(self, session_id: str) -> dict[str, Any]:
         session = self.get_session(session_id)
         if session["current_index"] == 0:

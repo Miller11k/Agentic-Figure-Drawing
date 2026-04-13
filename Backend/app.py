@@ -21,6 +21,7 @@ try:
         apply_element_update,
         apply_prompt_to_diagram_model,
         build_diagram_from_prompt,
+        diagram_model_to_structured_data,
         render_diagram_model,
         refresh_diagram_metadata,
     )
@@ -42,6 +43,7 @@ except ImportError:
         apply_element_update,
         apply_prompt_to_diagram_model,
         build_diagram_from_prompt,
+        diagram_model_to_structured_data,
         render_diagram_model,
         refresh_diagram_metadata,
     )
@@ -174,6 +176,12 @@ def _configured_model_name() -> Optional[str]:
     return configured_model or None
 
 
+def _prefers_fast_edit_path(model_name: Optional[str], workflow_profile: Optional[str]) -> bool:
+    model_value = (model_name or "").strip().lower()
+    profile_value = (workflow_profile or "").strip().lower()
+    return "flux" in model_value or profile_value == "flux"
+
+
 def _resolve_generation_tuning(
     *,
     task_type: str,
@@ -217,6 +225,7 @@ def _merge_operation_metadata(
     diagram_model: Optional[dict] = None,
     diagram_xml: Optional[str] = None,
     mode_state: Optional[dict] = None,
+    mask_metadata: Optional[dict] = None,
     model_routing: Optional[list[dict]] = None,
     warnings: Optional[list[str]] = None,
 ) -> dict[str, object]:
@@ -232,6 +241,8 @@ def _merge_operation_metadata(
         merged["diagram_xml"] = diagram_xml
     if mode_state is not None:
         merged["mode_state"] = mode_state
+    if mask_metadata is not None:
+        merged["mask_metadata"] = mask_metadata
     if model_routing is not None:
         merged["model_routing"] = model_routing
     if warnings is not None:
@@ -252,6 +263,10 @@ def _serialize_session(request: Request, session: dict) -> dict:
 
     current_entry = history[session["current_index"]]
     current_parameters = current_entry.get("parameters", {})
+    current_diagram_payload = current_parameters.get("diagram_model")
+    current_diagram_structure = None
+    if current_diagram_payload:
+        current_diagram_structure = diagram_model_to_structured_data(DiagramModel.from_dict(current_diagram_payload))
     return {
         "session_id": session["session_id"],
         "created_at": session["created_at"],
@@ -263,8 +278,10 @@ def _serialize_session(request: Request, session: dict) -> dict:
         "current_edit_intent": current_parameters.get("edit_intent"),
         "current_region_selection": current_parameters.get("region_selection"),
         "current_diagram_model": current_parameters.get("diagram_model"),
+        "current_diagram_structure": current_diagram_structure,
         "current_diagram_xml": current_parameters.get("diagram_xml"),
         "current_mode_state": current_parameters.get("mode_state"),
+        "current_mask_metadata": current_parameters.get("mask_metadata"),
         "current_model_routing": current_parameters.get("model_routing", []),
         "analysis_warnings": current_parameters.get("warnings", []),
         "current_model": current_entry.get("parameters", {}).get("model_name"),
@@ -285,11 +302,62 @@ def _analysis_operation_metadata(analysis) -> dict[str, object]:
         "diagram_model": payload.get("diagram_model"),
         "diagram_xml": diagram_model.xml_representation if diagram_model else None,
         "mode_state": payload.get("mode_state"),
+        "mask_metadata": payload.get("mask_metadata"),
         "model_routing": [decision.to_dict() for decision in diagram_model.routing_metadata]
         if diagram_model
         else None,
         "warnings": payload.get("warnings", []),
     }
+
+
+def _initial_upload_metadata() -> dict[str, object]:
+    return _merge_operation_metadata(
+        {},
+        content_mode="image",
+        region_selection={
+            "regions": [],
+            "confidence": 1.0,
+            "mask_type": "full",
+            "affected_element_ids": [],
+            "rationale": "Preserved the original uploaded image as the base history version.",
+        },
+        mask_metadata={
+            "used": False,
+            "source": "upload",
+            "mask_type": "full",
+            "regions": [],
+            "coverage_ratio": 0.0,
+            "width": 0,
+            "height": 0,
+            "mask_image_filename": None,
+            "mask_image_url": None,
+        },
+        warnings=["The original uploaded image is stored as history version 0 for non-destructive reverts."],
+    )
+
+
+def _attach_mask_asset(application: FastAPI, session: dict, mask_bytes: Optional[bytes]) -> dict:
+    if not mask_bytes:
+        return session
+
+    current_entry = session["edit_history"][session["current_index"]]
+    mask_filename = application.state.session_store.write_entry_image_asset(
+        session["session_id"],
+        current_entry["version"],
+        suffix="mask",
+        image_bytes=mask_bytes,
+    )
+    mask_metadata = dict(current_entry.get("parameters", {}).get("mask_metadata") or {})
+    if not mask_metadata:
+        return session
+
+    mask_metadata["mask_image_filename"] = mask_filename
+    mask_metadata["mask_image_url"] = _session_image_url(session["session_id"], mask_filename)
+    return application.state.session_store.update_entry_parameters(
+        session["session_id"],
+        current_entry["version"],
+        {"mask_metadata": mask_metadata},
+    )
 
 
 def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
@@ -485,6 +553,7 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
         prompt_text: str = Form(...),
         session_id: Optional[str] = Form(None),
         input_image: Optional[UploadFile] = File(None),
+        mask_image: Optional[UploadFile] = File(None),
         model_name: Optional[str] = Form(None),
         workflow_profile: Optional[str] = Form(None),
         mode_override: Optional[str] = Form(None),
@@ -506,10 +575,22 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
             )
 
         try:
-            task_type = "diagram_cleanup" if mode_override == "diagram" else "image_edit"
+            has_mask_upload = mask_image is not None
+            task_type = (
+                "diagram_cleanup"
+                if mode_override == "diagram"
+                else "asset_refine"
+                if has_mask_upload
+                else "image_edit"
+            )
+            requested_model = model_name
+            requested_profile = workflow_profile
+            if has_mask_upload and mode_override != "diagram" and _prefers_fast_edit_path(model_name, workflow_profile):
+                requested_model = None
+                requested_profile = None
             resolved_model, resolved_profile = backend.resolve_task_execution(
-                model_name,
-                workflow_profile,
+                requested_model,
+                requested_profile,
                 task_type,
             )
             tuning = _resolve_generation_tuning(
@@ -536,6 +617,7 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
             if session_id and input_image is None:
                 current_session = application.state.session_store.get_session(session_id)
                 base_image = application.state.session_store.get_current_image_bytes(session_id)
+                mask_bytes = await mask_image.read() if mask_image is not None else None
                 current_diagram_payload = _current_entry_parameters(current_session).get("diagram_model")
                 existing_diagram_model = (
                     DiagramModel.from_dict(current_diagram_payload) if current_diagram_payload else None
@@ -545,6 +627,7 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
                     base_image,
                     prompt,
                     model_name=resolved_model,
+                    workflow_profile=resolved_profile,
                     server_url=server_url,
                     seed=seed,
                     steps=int(tuning["steps"]),
@@ -554,6 +637,7 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
                     denoise=float(tuning["denoise"]),
                     existing_diagram_model=existing_diagram_model,
                     mode_override=mode_override,
+                    mask_image_bytes=mask_bytes,
                 )
                 session = application.state.session_store.append_edit(
                     session_id,
@@ -566,14 +650,17 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
                         **_analysis_operation_metadata(edit_result.analysis),
                     ),
                 )
+                session = _attach_mask_asset(application, session, mask_bytes)
                 return _serialize_session(request, session)
 
             uploaded_bytes = await input_image.read()
+            mask_bytes = await mask_image.read() if mask_image is not None else None
             edit_result = await run_in_threadpool(
                 perform_precise_edit,
                 uploaded_bytes,
                 prompt,
                 model_name=resolved_model,
+                workflow_profile=resolved_profile,
                 server_url=server_url,
                 filename=input_image.filename,
                 seed=seed,
@@ -583,20 +670,42 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
                 scheduler=str(tuning["scheduler"]),
                 denoise=float(tuning["denoise"]),
                 mode_override=mode_override,
+                mask_image_bytes=mask_bytes,
             )
-            session = application.state.session_store.create_session(
-                generated_image_bytes=edit_result.image_bytes,
-                original_image_bytes=edit_result.image_bytes
-                if edit_result.analysis.content_mode == "diagram"
-                else uploaded_bytes,
-                prompt=prompt,
-                operation="diagram_edit" if edit_result.analysis.content_mode == "diagram" else "edit",
-                source="diagram_upload" if edit_result.analysis.content_mode == "diagram" else "upload",
-                parameters=_merge_operation_metadata(
-                    base_parameters,
-                    **_analysis_operation_metadata(edit_result.analysis),
-                ),
-            )
+            if edit_result.analysis.content_mode == "diagram":
+                session = application.state.session_store.create_session(
+                    generated_image_bytes=edit_result.image_bytes,
+                    original_image_bytes=edit_result.image_bytes,
+                    prompt=prompt,
+                    operation="diagram_edit",
+                    source="diagram_upload",
+                    parameters=_merge_operation_metadata(
+                        base_parameters,
+                        **_analysis_operation_metadata(edit_result.analysis),
+                    ),
+                )
+                session = _attach_mask_asset(application, session, mask_bytes)
+            else:
+                session = application.state.session_store.create_session(
+                    generated_image_bytes=uploaded_bytes,
+                    original_image_bytes=uploaded_bytes,
+                    prompt=f"Imported {input_image.filename or 'uploaded image'}",
+                    operation="original",
+                    source="upload",
+                    parameters=_initial_upload_metadata(),
+                )
+                session = application.state.session_store.append_edit(
+                    session["session_id"],
+                    image_bytes=edit_result.image_bytes,
+                    prompt=prompt,
+                    operation="edit",
+                    source="upload",
+                    parameters=_merge_operation_metadata(
+                        base_parameters,
+                        **_analysis_operation_metadata(edit_result.analysis),
+                    ),
+                )
+                session = _attach_mask_asset(application, session, mask_bytes)
             return _serialize_session(request, session)
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -904,6 +1013,21 @@ def create_app(session_store: Optional[FileSessionStore] = None) -> FastAPI:
 
             diagram_model = refresh_diagram_metadata(DiagramModel.from_dict(current_diagram_payload))
             return Response(content=diagram_model.xml_representation, media_type="application/xml")
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/diagram/json/{session_id}")
+    @application.get("/api/diagram/json/{session_id}")
+    async def diagram_json(session_id: str):
+        try:
+            session = application.state.session_store.get_session(session_id)
+            current_parameters = _current_entry_parameters(session)
+            current_diagram_payload = current_parameters.get("diagram_model")
+            if not current_diagram_payload:
+                raise HTTPException(status_code=400, detail="This session does not have an editable diagram model.")
+
+            diagram_model = refresh_diagram_metadata(DiagramModel.from_dict(current_diagram_payload))
+            return diagram_model_to_structured_data(diagram_model)
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

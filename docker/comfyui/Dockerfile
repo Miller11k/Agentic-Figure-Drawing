@@ -23,7 +23,8 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git
 WORKDIR /opt/ComfyUI
 RUN python3 -m pip install --upgrade pip && \
     python3 -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128 && \
-    python3 -m pip install -r requirements.txt
+    python3 -m pip install -r requirements.txt && \
+    python3 -m pip install gguf sentencepiece protobuf
 
 EXPOSE 8188
 

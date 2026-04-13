@@ -21,13 +21,15 @@ This project can now route different tasks to different local model families:
 - `flux-kontext`: recommended for precise local editing when available
 - `qwen-image`: built-in workflow support, but you still need to install the Qwen Image local weights
 - `qwen-image-edit`: built-in workflow support, but you still need to install the Qwen Image Edit local weights
+- `qwen-image-edit-gguf`: quantized low-VRAM Qwen Image Edit support through `ComfyUI-GGUF`
 
 ## Current Local Recommendation
 
 - Use `flux1-schnell-fp8.safetensors` with the `flux` profile for prompt-only generation.
 - Use `flux1-schnell-fp8.safetensors` with the `flux` profile for standard image editing too.
 - Keep `sd_xl_base_1.0.safetensors` with the `sdxl` profile available for cleanup-oriented fallback tasks.
-- The local hardware in this repo's default setup is an 8 GB RTX 4070 Laptop GPU, so Qwen is code-ready but not installed as the active local default.
+- On this repo's 8 GB RTX 4070 Laptop GPU, the practical local Qwen path is `Qwen-Image-Edit-2509-Q2_K.gguf` with the `qwen-image-edit-gguf` profile.
+- Keep FLUX as the default day-to-day edit path unless you explicitly want Qwen's slower but stronger instruction-following edit behavior.
 
 ## Environment Variables
 
@@ -55,8 +57,11 @@ Advanced custom workflow template paths:
 - `WORKFLOW_TEMPLATE_TEXT_TO_IMAGE_QWEN_IMAGE`
 - `WORKFLOW_TEMPLATE_IMAGE_EDIT_QWEN_IMAGE`
 - `WORKFLOW_TEMPLATE_IMAGE_EDIT_QWEN_IMAGE_EDIT`
+- `WORKFLOW_TEMPLATE_IMAGE_EDIT_QWEN_IMAGE_EDIT_GGUF`
 - `QWEN_CLIP_MODEL`
 - `QWEN_VAE_MODEL`
+- `QWEN_GGUF_CLIP_MODEL`
+- `QWEN_GGUF_VAE_MODEL`
 
 ## Template Placeholders
 
@@ -74,3 +79,15 @@ For exported ComfyUI workflow JSON files, replace editable values with:
 - `__SAMPLER__`
 - `__SCHEDULER__`
 - `__DENOISE__`
+
+## Working Local Qwen GGUF Setup
+
+The current verified local Qwen edit path in this repo is:
+
+- diffusion model: `ComfyUI/models/unet/Qwen-Image-Edit-2509-Q2_K.gguf`
+- text encoder: `ComfyUI/models/text_encoders/Qwen2.5-VL-7B-Instruct-Q2_K.gguf`
+- mmproj: `ComfyUI/models/text_encoders/Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf`
+- vae: `ComfyUI/models/vae/Qwen_Image-VAE.safetensors`
+- workflow profile: `qwen-image-edit-gguf`
+
+Use that profile for prompt+image editing when you want the strongest local Qwen route on this laptop.

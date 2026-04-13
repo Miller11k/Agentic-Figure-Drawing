@@ -53,13 +53,14 @@ Supported profiles:
 - `flux-kontext`: expects a custom edit template via `WORKFLOW_TEMPLATE_IMAGE_EDIT_FLUX_KONTEXT`
 - `qwen-image`: includes a built-in Qwen Image text-to-image workflow, but still requires the actual Qwen local weights
 - `qwen-image-edit`: includes a built-in Qwen Image Edit workflow, but still requires the actual Qwen local weights
+- `qwen-image-edit-gguf`: includes a built-in low-VRAM ComfyUI-GGUF edit workflow for quantized local Qwen Image Edit
 
 ### Recommended Setup
 
 - Use `flux` for both prompt-only generation and standard image editing on this machine. The shipped default is tuned to `640x640` because that has been stable on the local 8 GB RTX 4070 Laptop GPU.
 - Keep `sdxl` available for diagram cleanup and as a fallback when you want the older checkpoint-style workflow behavior.
-- Use `qwen-image-edit` or `flux-kontext` for edit-heavy tasks when you have those local workflows exported from ComfyUI.
-- Qwen is wired into the codebase, but the official local Qwen stack is not installed in this repo right now. On this machine's 8 GB GPU, the full local Qwen Image setup is not a practical default.
+- Use `qwen-image-edit-gguf` when you want the strongest local Qwen edit path on this machine. The verified working local model is `Qwen-Image-Edit-2509-Q2_K.gguf`, paired with the quantized `Qwen2.5-VL-7B-Instruct-Q2_K.gguf` encoder and the Qwen image VAE.
+- Keep FLUX as the default for day-to-day speed and stability. On this machine's 8 GB GPU, native full-precision Qwen is still not a practical default.
 - Keep `legacy` as a fallback for compatibility while you are migrating.
 
 ### Custom Workflow Templates
@@ -80,6 +81,18 @@ For advanced model families, export a working ComfyUI workflow JSON and replace 
 - `__DENOISE__`
 
 Then point the matching `WORKFLOW_TEMPLATE_...` env var at that JSON file.
+
+### Verified Local Qwen GGUF Path
+
+This repo now includes a working quantized Qwen edit path through `ComfyUI-GGUF`.
+
+- Model: `Qwen-Image-Edit-2509-Q2_K.gguf`
+- Profile: `qwen-image-edit-gguf`
+- Text encoder: `Qwen2.5-VL-7B-Instruct-Q2_K.gguf`
+- MM projector: `Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf`
+- VAE: `Qwen_Image-VAE.safetensors`
+
+This route is slower than FLUX, but it now works locally for prompt+image edits and preserves session history correctly.
 
 ## Frontend Notes
 

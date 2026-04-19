@@ -5,14 +5,14 @@ services:
     image: miller11k/agentic-figure-drawer:latest
     build:
       context: .
-      args:
-    volumes:
-      - ./Database:/docker-entrypoint-database
-    container_name: playbook-insights
+      # args:
+    network_mode: host
+    container_name: agentic-figure-editor
     ports:
       - "5080:5080"   # Frontend
       - "9988:9988"   # API
     environment:
       API_PORT: 9988
       NODE_ENV: production
+      MODEL: v1-5-pruned-emaonly-fp16.safetensors
     restart: always

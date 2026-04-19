@@ -1,10 +1,3 @@
-/**
- * @fileoverview Logic for a dual-mode upload/prompt interface.
- * Supports image previews, .drawio diagram rendering via diagrams.net,
- * and switching between "Image" and "Prompt" modes.
- */
-
-// --- DOM Element Selectors ---
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const previewImg = document.getElementById('preview-img');
@@ -18,55 +11,27 @@ const btnPromptMode = document.getElementById('mode-prompt');
 const btnImageMode = document.getElementById('mode-image');
 const container = document.querySelector('.upload-container');
 
-/** * @type {string} Defines the current interaction state: "image" or "prompt".
- */
-let currentMode = "image"; 
+let currentMode = "image";
+let uploadedFile = null;
+let encodedFileData = "";
 
-/** * @type {string} Stores the Base64 data URL (for images) or XML string (for .drawio).
- */
-let encodedFileData = ""; 
-
-// --- 1. DRAG & DROP HANDLERS ---
-
-/**
- * Prevent default browser behavior (e.g., opening the image in the tab)
- * across all drag-and-drop events.
- */
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    }, false);
+    dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
 });
-
-/**
- * Visual feedback handlers to highlight the drop area during hover.
- */
 ['dragenter', 'dragover'].forEach(eventName => {
     dropZone.addEventListener(eventName, () => dropZone.classList.add('drag-over'), false);
 });
-
 ['dragleave', 'drop'].forEach(eventName => {
     dropZone.addEventListener(eventName, () => dropZone.classList.remove('drag-over'), false);
 });
 
-/**
- * Handles the drop event specifically to extract the file object.
- */
 dropZone.addEventListener('drop', (e) => {
-    const dt = e.dataTransfer;
-    const files = dt.files;
+    const files = e.dataTransfer.files;
     if (files.length) handleFile(files[0]);
 });
 
-// --- 2. CLICK HANDLERS ---
-
-/**
- * Trigger hidden file input when the drop zone is clicked, 
- * provided a file hasn't already been uploaded.
- */
 dropZone.addEventListener('click', () => {
-    if (encodedFileData) return; 
+    if (encodedFileData) return;
     fileInput.click();
 });
 
@@ -74,83 +39,40 @@ fileInput.addEventListener('change', (e) => {
     if (e.target.files.length) handleFile(e.target.files[0]);
 });
 
-// --- 3. FILE PROCESSING LOGIC ---
-
-/**
- * Validates the file type and reads it into memory using FileReader.
- * @param {File} file - The file object from input or drag-drop.
- */
 function handleFile(file) {
     const isImage = file.type.startsWith('image/');
     const isDrawIO = file.name.toLowerCase().endsWith('.drawio');
+    if (!isImage && !isDrawIO) { showError("Unsupported file type!"); return; }
 
-    // Basic validation for supported types
-    if (!isImage && !isDrawIO) {
-        showError("Unsupported file type!");
-        return;
-    }
-
+    uploadedFile = file;
     const reader = new FileReader();
-    
-    /**
-     * Callback triggered once the file is fully read.
-     * @param {ProgressEvent<FileReader>} e 
-     */
     reader.onload = (e) => {
         encodedFileData = e.target.result;
-        
         if (isImage) {
             drawioContainer.style.display = 'none';
             previewImg.src = encodedFileData;
             previewImg.style.display = 'block';
         } else {
-            // Processing for .drawio XML content
             previewImg.style.display = 'none';
             drawioContainer.style.display = 'block';
             renderDrawio(encodedFileData);
         }
         showUI();
     };
-
-    // Images use DataURL (Base64), DrawIO uses raw Text (XML)
     if (isImage) reader.readAsDataURL(file);
     else reader.readAsText(file);
 }
 
-// --- 4. DRAW.IO RENDERER ---
-
-/**
- * Injects Draw.io XML into the container and triggers the Diagrams.net 
- * GraphViewer to render it as an interactive diagram.
- * @param {string} xmlData - The raw XML string from a .drawio file.
- */
 function renderDrawio(xmlData) {
     drawioContainer.innerHTML = '';
     const div = document.createElement('div');
     div.className = 'mxgraph';
     div.style.maxWidth = '100%';
-    
-    // Configuration for the diagrams.net viewer engine
-    const config = {
-        highlight: '#38bdf8',
-        nav: false,
-        toolbar: 'hidden', 
-        edit: null,
-        xml: xmlData
-    };
-    
-    div.setAttribute('data-mxgraph', JSON.stringify(config));
+    div.setAttribute('data-mxgraph', JSON.stringify({ highlight: '#38bdf8', nav: false, toolbar: 'hidden', edit: null, xml: xmlData }));
     drawioContainer.appendChild(div);
-
-    // Call the external diagrams.net script if it exists in the global scope
-    if (window.GraphViewer) {
-        GraphViewer.processElements();
-    }
+    if (window.GraphViewer) GraphViewer.processElements();
 }
 
-/**
- * Resets the application state to the default Image mode.
- */
 function init() {
     currentMode = "image";
     container.classList.remove('mode-prompt-active');
@@ -158,23 +80,35 @@ function init() {
     btnPromptMode.classList.remove('active');
 }
 
-// --- 5. UI & MODE LOGIC ---
-
-/**
- * Toggles UI visibility once a file has been successfully uploaded.
- */
 function showUI() {
     promptText.classList.add('hidden');
     restartBtn.classList.remove('hidden');
 }
 
-/**
- * Clears all uploaded data and resets the preview UI.
- */
+function switchToImageMode(blob, imageUrl) {
+    // Convert blob to a File so it can be re-submitted
+    uploadedFile = new File([blob], 'generated.png', { type: 'image/png' });
+    encodedFileData = imageUrl;
+
+    // Show the drop zone if it was hidden (prompt-only mode)
+    container.classList.remove('mode-prompt-active');
+
+    // Switch mode buttons
+    currentMode = "image";
+    btnImageMode.classList.add('active');
+    btnPromptMode.classList.remove('active');
+
+    // Update the preview in place
+    drawioContainer.style.display = 'none';
+    previewImg.src = imageUrl;
+    previewImg.style.display = 'block';
+    promptText.classList.add('hidden');
+    restartBtn.classList.remove('hidden');
+}
+
 restartBtn.addEventListener('click', (e) => {
-    // Stop event from bubbling to the dropZone click handler
-    e.stopPropagation(); 
-    
+    e.stopPropagation();
+    uploadedFile = null;
     encodedFileData = "";
     previewImg.src = "";
     previewImg.style.display = 'none';
@@ -182,12 +116,9 @@ restartBtn.addEventListener('click', (e) => {
     drawioContainer.style.display = 'none';
     promptText.classList.remove('hidden');
     restartBtn.classList.add('hidden');
-    fileInput.value = ""; 
+    fileInput.value = "";
 });
 
-/**
- * Switches the UI to Prompt Mode.
- */
 btnPromptMode.addEventListener('click', () => {
     currentMode = "prompt";
     btnPromptMode.classList.add('active');
@@ -195,9 +126,6 @@ btnPromptMode.addEventListener('click', () => {
     container.classList.add('mode-prompt-active');
 });
 
-/**
- * Switches the UI back to Image Mode.
- */
 btnImageMode.addEventListener('click', () => {
     currentMode = "image";
     btnImageMode.classList.add('active');
@@ -205,46 +133,59 @@ btnImageMode.addEventListener('click', () => {
     container.classList.remove('mode-prompt-active');
 });
 
-// --- Updated Submit Logic ---
-
-/**
- * Validates inputs based on the current mode and "submits" the data.
- * Currently logs result to the console for demonstration.
- */
-submitBtn.addEventListener('click', () => {
+submitBtn.addEventListener('click', async () => {
     const prompt = userDescription.value.trim();
 
-    // Contextual validation
-    if (currentMode === "image" && !encodedFileData) {
+    if (currentMode === "image" && !uploadedFile) {
         showError("Please upload an image for this mode!");
         return;
     }
-    
-    if (currentMode === "prompt" && !prompt) {
+    if (!prompt) {
         showError("Please enter a prompt!");
         return;
     }
 
-    console.log("--- SUBMISSION ---");
-    console.log("Mode:", currentMode);
-    console.log("Prompt:", prompt || "(Empty)");
-    
-    if (currentMode === "image") {
-        // Log a snippet of the data for verification
-        console.log("Data Snippet:", encodedFileData.substring(0, 50) + "...");
+    const formData = new FormData();
+    formData.append('prompt_text', prompt);
+    if (currentMode === "image" && uploadedFile) {
+        formData.append('input_image', uploadedFile);
     }
-    
-    alert(`Success! Mode: ${currentMode}. Data logged to console.`);
+
+    setLoading(true);
+
+    try {
+        const response = await fetch('/generate/image', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(err.detail || 'Server error ' + response.status);
+        }
+
+        const blob = await response.blob();
+        const imageUrl = URL.createObjectURL(blob);
+
+        // Replace preview with generated image and switch to image+prompt mode
+        switchToImageMode(blob, imageUrl);
+
+    } catch (err) {
+        showError('Generation failed: ' + err.message);
+    } finally {
+        setLoading(false);
+    }
 });
 
-/**
- * Displays a transient error message to the user.
- * @param {string} message - The error text to display.
- */
-function showError(message) {
-    errorDiv.textContent = message;
-    setTimeout(() => { errorDiv.textContent = ""; }, 3000);
+function setLoading(isLoading) {
+    submitBtn.disabled = isLoading;
+    submitBtn.textContent = isLoading ? 'Generating…' : 'Submit Request';
+    submitBtn.style.opacity = isLoading ? '0.7' : '1';
 }
 
-// Initialize application
+function showError(message) {
+    errorDiv.textContent = message;
+    setTimeout(() => { errorDiv.textContent = ""; }, 4000);
+}
+
 init();

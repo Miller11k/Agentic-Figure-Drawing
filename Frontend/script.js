@@ -7,14 +7,79 @@ const submitBtn = document.getElementById('submit-btn');
 const promptText = document.getElementById('prompt-text');
 const errorDiv = document.getElementById('error-message');
 const userDescription = document.getElementById('user-description');
+const downloadBtn = document.getElementById('download-btn');
 const btnPromptMode = document.getElementById('mode-prompt');
 const btnImageMode = document.getElementById('mode-image');
 const container = document.querySelector('.upload-container');
 
+// Model dropdown elements
+const modelDropdown = document.getElementById('model-dropdown');
+const modelSelectedText = document.getElementById('model-selected-text');
+const modelList = document.getElementById('model-list');
+const modelError = document.getElementById('model-error');
+
 let currentMode = "image";
 let uploadedFile = null;
 let encodedFileData = "";
+let selectedModel = null;
+let availableModels = [];
 
+// ── Model Dropdown Logic ──────────────────────────────────────────
+async function loadModels() {
+    try {
+        const res = await fetch('/api/models');
+        if (!res.ok) throw new Error('Failed to fetch models');
+        const data = await res.json();
+        availableModels = data.models || [];
+    } catch (e) {
+        availableModels = [];
+    }
+
+    modelDropdown.classList.remove('model-dropdown--loading');
+
+    if (availableModels.length === 0) {
+        modelSelectedText.textContent = 'No models available';
+        modelDropdown.classList.add('model-dropdown--loading');
+        modelError.classList.remove('hidden');
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.5';
+        submitBtn.title = 'No models available on the server';
+        return;
+    }
+
+    selectedModel = availableModels[0];
+    modelSelectedText.textContent = selectedModel;
+
+    availableModels.forEach((m, i) => {
+        const li = document.createElement('li');
+        li.textContent = m;
+        li.setAttribute('role', 'option');
+        if (i === 0) li.classList.add('selected');
+        li.addEventListener('click', () => {
+            selectedModel = m;
+            modelSelectedText.textContent = m;
+            modelList.querySelectorAll('li').forEach(el => el.classList.remove('selected'));
+            li.classList.add('selected');
+            modelDropdown.classList.remove('open');
+        });
+        modelList.appendChild(li);
+    });
+}
+
+modelDropdown.querySelector('.model-dropdown__selected').addEventListener('click', () => {
+    if (availableModels.length === 0) return;
+    modelDropdown.classList.toggle('open');
+});
+
+document.addEventListener('click', (e) => {
+    if (!modelDropdown.contains(e.target)) {
+        modelDropdown.classList.remove('open');
+    }
+});
+
+loadModels();
+
+// ── Drag & Drop ───────────────────────────────────────────────────
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
     dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
 });
@@ -30,13 +95,18 @@ dropZone.addEventListener('drop', (e) => {
     if (files.length) handleFile(files[0]);
 });
 
+// Always open file picker on click — allows replacing the current image.
+// Reset value first so 'change' fires even if the same file is re-picked.
 dropZone.addEventListener('click', () => {
-    if (encodedFileData) return;
+    fileInput.value = '';
     fileInput.click();
 });
 
+// Only act if the user actually picked a file; cancelling leaves the old image intact.
 fileInput.addEventListener('change', (e) => {
-    if (e.target.files.length) handleFile(e.target.files[0]);
+    if (e.target.files.length) {
+        handleFile(e.target.files[0]);
+    }
 });
 
 function handleFile(file) {
@@ -83,27 +153,26 @@ function init() {
 function showUI() {
     promptText.classList.add('hidden');
     restartBtn.classList.remove('hidden');
+    if (uploadedFile && uploadedFile.type.startsWith('image/')) {
+        downloadBtn.classList.remove('hidden');
+    }
 }
 
 function switchToImageMode(blob, imageUrl) {
-    // Convert blob to a File so it can be re-submitted
     uploadedFile = new File([blob], 'generated.png', { type: 'image/png' });
     encodedFileData = imageUrl;
 
-    // Show the drop zone if it was hidden (prompt-only mode)
     container.classList.remove('mode-prompt-active');
-
-    // Switch mode buttons
     currentMode = "image";
     btnImageMode.classList.add('active');
     btnPromptMode.classList.remove('active');
 
-    // Update the preview in place
     drawioContainer.style.display = 'none';
     previewImg.src = imageUrl;
     previewImg.style.display = 'block';
     promptText.classList.add('hidden');
     restartBtn.classList.remove('hidden');
+    downloadBtn.classList.remove('hidden');
 }
 
 restartBtn.addEventListener('click', (e) => {
@@ -116,6 +185,7 @@ restartBtn.addEventListener('click', (e) => {
     drawioContainer.style.display = 'none';
     promptText.classList.remove('hidden');
     restartBtn.classList.add('hidden');
+    downloadBtn.classList.add('hidden');
     fileInput.value = "";
 });
 
@@ -134,6 +204,10 @@ btnImageMode.addEventListener('click', () => {
 });
 
 submitBtn.addEventListener('click', async () => {
+    if (availableModels.length === 0) {
+        showError("No models available on the server!");
+        return;
+    }
     const prompt = userDescription.value.trim();
 
     if (currentMode === "image" && !uploadedFile) {
@@ -147,6 +221,7 @@ submitBtn.addEventListener('click', async () => {
 
     const formData = new FormData();
     formData.append('prompt_text', prompt);
+    if (selectedModel) formData.append('model_name', selectedModel);
     if (currentMode === "image" && uploadedFile) {
         formData.append('input_image', uploadedFile);
     }
@@ -166,8 +241,6 @@ submitBtn.addEventListener('click', async () => {
 
         const blob = await response.blob();
         const imageUrl = URL.createObjectURL(blob);
-
-        // Replace preview with generated image and switch to image+prompt mode
         switchToImageMode(blob, imageUrl);
 
     } catch (err) {
@@ -187,5 +260,16 @@ function showError(message) {
     errorDiv.textContent = message;
     setTimeout(() => { errorDiv.textContent = ""; }, 4000);
 }
+
+downloadBtn.addEventListener('click', () => {
+    if (!encodedFileData) return;
+    const a = document.createElement('a');
+    a.href = encodedFileData;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `generated-${timestamp}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+});
 
 init();

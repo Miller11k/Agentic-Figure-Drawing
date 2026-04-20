@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Drag & Drop Uploader</title>
+    <title>Agentic Figure Editor</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://viewer.diagrams.net/js/viewer-static.min.js"></script>
 </head>
 <body>
 
     <div class="upload-container">
-        <h2 style="margin-top: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.025em;">Uploader</h2>
+        <h2 style="margin-top: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.025em;">Agentic Figure Editor</h2>
 
         
         <div id="drop-zone-wrapper">
@@ -24,8 +24,22 @@
             </div>
         </div>
 
-        <!-- <br/> -->
+        <br/>
        
+        <div class="model-selector-wrapper">
+            <div class="model-selector-label">Model</div>
+            <div id="model-dropdown" class="model-dropdown model-dropdown--loading">
+                <div class="model-dropdown__selected">
+                    <span id="model-selected-text">Loading models…</span>
+                    <svg class="model-dropdown__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </div>
+                <ul id="model-list" class="model-dropdown__list" role="listbox" aria-label="Select a model"></ul>
+            </div>
+            <div id="model-error" class="model-error hidden">No models available on server</div>
+        </div>
+
         <div class="mode-selector">
             <button id="mode-image" class="mode-btn active">Prompt + Image</button>
             <button id="mode-prompt" class="mode-btn">Prompt Only</button>
@@ -38,6 +52,7 @@
 
         <div class="button-group">
             <button id="restart-btn" class="btn-restart hidden">Remove</button>
+            <button id="download-btn" class="btn-download hidden">Download</button>
             <button id="submit-btn" class="btn-submit">Submit Request</button>
         </div>
     </div>

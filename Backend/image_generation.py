@@ -27,6 +27,28 @@ KSAMPLER_ID = "3"
 CHECKPOINT_LOADER_ID = "4"
 EMPTY_LATENT_ID = "12" # Node ID for Empty Latent Image
 
+# Per-model parameter overrides.
+# Any model whose filename contains a key (case-insensitive) gets these defaults
+# applied automatically, overriding whatever the caller passed in.
+MODEL_CONFIGS = {
+    "sdxl_lightning": {
+        "steps": 4,
+        "cfg": 1.8,
+        "sampler": "euler",
+        "scheduler": "sgm_uniform",
+    },
+}
+
+def get_model_config(model_name: str) -> dict:
+    """Return parameter overrides for the given model filename, or {} if none."""
+    if not model_name:
+        return {}
+    lower = model_name.lower()
+    for key, config in MODEL_CONFIGS.items():
+        if key in lower:
+            return config
+    return {}
+
 
 def list_models(server_url):
     """Fetches all available checkpoints from the Server."""
@@ -72,7 +94,13 @@ def process_prompt(model_name, prompt_text, server_url,
     # Node 4: Model Selection
     workflow[CHECKPOINT_LOADER_ID]["inputs"]["ckpt_name"] = model_name
     
-    # Node 3: KSampler Settings
+    # Node 3: KSampler Settings — apply per-model overrides first
+    cfg_override = get_model_config(model_name)
+    steps    = cfg_override.get("steps",     steps)
+    cfg      = cfg_override.get("cfg",       cfg)
+    sampler  = cfg_override.get("sampler",   sampler)
+    scheduler= cfg_override.get("scheduler", scheduler)
+
     final_seed = seed if seed is not None else random.randint(1, 1000000000000)
     workflow[KSAMPLER_ID]["inputs"]["seed"] = final_seed
     workflow[KSAMPLER_ID]["inputs"]["steps"] = steps
@@ -140,7 +168,16 @@ def process_image(model_name, denoise_val: float, prompt_text, server_url, input
     # Model Selection
     workflow[CHECKPOINT_LOADER_ID]["inputs"]["ckpt_name"] = model_name
     
-    # KSampler Settings (Node 3)
+    # KSampler Settings (Node 3) — apply per-model overrides first
+    cfg_override = get_model_config(model_name)
+    steps    = cfg_override.get("steps",     steps)
+    cfg      = cfg_override.get("cfg",       cfg)
+    sampler  = cfg_override.get("sampler",   sampler)
+    scheduler= cfg_override.get("scheduler", scheduler)
+    # For lightning models denoise should stay at 1.0 for img2img too
+    if "denoise" in cfg_override:
+        denoise = cfg_override["denoise"]
+
     # If no seed is provided, generate a random one
     final_seed = seed if seed is not None else random.randint(1, 1000000000000)
     
@@ -238,20 +275,5 @@ if __name__ == "__main__":
         else:
             print("Stage 2 failed.")
 
-        # Pass an IMAGE to the model instead of bytes
-        # local_file_path = os.path.expanduser("~/SAMPLE PATH/SAMPLE.png")    # PUT FILE PATH HERE
-        # if os.path.exists(local_file_path):
-        #     file_result = process_image(
-        #         model_name=model, 
-        #         denoise_val=0.5, 
-        #         prompt_text="A sketch of this person",
-        #         server_url=server_url, 
-        #         input_image=local_file_path, # Pass the string path
-        #         denoise=0.5
-        #     )
-        #     if file_result:
-        #         Image.open(io.BytesIO(file_result)).show(title="Result from Local File")
-        # else:
-        #     print(f"File not found: {local_file_path}")
     else:
         print("Stage 1 failed. Skipping Stage 2.")

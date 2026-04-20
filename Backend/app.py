@@ -12,7 +12,7 @@ from typing import Optional
 from dotenv import load_dotenv
 import uvicorn
 from pathlib import Path
-from image_generation import process_image, process_prompt
+from image_generation import process_image, process_prompt, list_models
 
 load_dotenv()
 
@@ -59,6 +59,17 @@ async def track_connections(request: Request, call_next):
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/models")
+def get_models():
+    server_url = os.getenv("SERVER_URL")
+    if not server_url:
+        raise HTTPException(status_code=500, detail="SERVER_URL not configured")
+    try:
+        models = list_models(server_url)
+        return {"models": models}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch models: {str(e)}")
 
 @app.post("/generate/image")
 async def handle_generate_image(

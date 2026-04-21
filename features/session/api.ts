@@ -9,6 +9,7 @@ import type {
   SessionHistoryResponse
 } from "./types";
 import type { DiagramModel, DirectDiagramEditOperation, EditorMode } from "@/types";
+import { buildImageEditPayload } from "@/lib/image/mask";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -109,7 +110,7 @@ export function editImage(
 ) {
   return requestJson<ImageWorkflowResult>("/api/image/edit", {
     method: "POST",
-    body: JSON.stringify({ sessionId, prompt, imageBase64, maskBase64, parentVersionId })
+    body: JSON.stringify(buildImageEditPayload({ sessionId, prompt, imageBase64, maskBase64, parentVersionId }))
   });
 }
 

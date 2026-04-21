@@ -104,6 +104,34 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
     pipelineName: "image-editing"
   };
 
+  const sourceArtifact = await persistArtifactForVersion({
+    sessionId: input.sessionId,
+    versionId: version.id,
+    artifactType: "source",
+    fileName: "source-image.png",
+    mimeType: "image/png",
+    data: input.image,
+    metadata: {
+      pipelineName: "image-editing",
+      role: "source"
+    }
+  });
+
+  const maskArtifact = input.mask
+    ? await persistArtifactForVersion({
+        sessionId: input.sessionId,
+        versionId: version.id,
+        artifactType: "mask",
+        fileName: "mask.png",
+        mimeType: "image/png",
+        data: input.mask,
+        metadata: {
+          pipelineName: "image-editing",
+          role: "mask"
+        }
+      })
+    : undefined;
+
   const { result: parsedIntent } = await runTracedStage(
     {
       ...traceBase,
@@ -151,12 +179,16 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
       mimeType: imageResult.mimeType,
       bytes: imageResult.image.byteLength,
       revisedPrompt: imageResult.revisedPrompt,
-      hasMask: Boolean(input.mask)
+      hasMask: Boolean(input.mask),
+      sourceArtifactId: sourceArtifact.id,
+      maskArtifactId: maskArtifact?.id
     },
     metadata: {
       pipelineName: "image-editing",
       status: "completed",
-      artifactId: artifact.id
+      artifactId: artifact.id,
+      sourceArtifactId: sourceArtifact.id,
+      maskArtifactId: maskArtifact?.id
     }
   });
 
@@ -164,6 +196,8 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
     versionId: version.id,
     parsedIntent,
     artifactId: artifact.id,
+    sourceArtifactId: sourceArtifact.id,
+    maskArtifactId: maskArtifact?.id,
     mimeType: imageResult.mimeType,
     bytes: imageResult.image.byteLength,
     revisedPrompt: imageResult.revisedPrompt

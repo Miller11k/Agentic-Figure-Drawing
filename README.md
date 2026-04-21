@@ -2,7 +2,7 @@
 
 This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
 
-Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 added the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation. Phase 4 connected the backend API layer. Phase 5 added the main three-panel frontend shell. Phase 6 adds interactive direct diagram editing.
+Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 added the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation. Phase 4 connected the backend API layer. Phase 5 added the main three-panel frontend shell. Phase 6 added interactive direct diagram editing. Phase 7 adds the image editor and mask-based localized edit flow.
 
 ## Tech Stack
 
@@ -203,3 +203,19 @@ The diagram workspace supports structured direct edits against `DiagramModel`:
 - inspect selected element data in the right panel
 
 Each direct edit creates a new session version and persisted Draw.io XML artifact. Prompt-guided diagram editing remains available from the left prompt panel and shares the same session/version history.
+
+## Image Editing Workspace
+
+The image workspace supports:
+
+- generated image preview through stored artifacts
+- source image upload for prompt-based editing
+- mask drawing directly over the rendered image
+- natural-image coordinate alignment for mask strokes
+- brush size control
+- mask undo/redo
+- clear mask
+- prompt-based image editing with optional localized mask submission
+- download of the active image artifact
+
+For OpenAI image edits, the visible teal brush overlay is converted into an API-compatible PNG mask where the drawn region becomes transparent. Image edit versions persist the uploaded source image, optional mask artifact, and final edited image artifact in session history.

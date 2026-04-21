@@ -15,6 +15,7 @@ interface EditorState {
   activeArtifactId?: string;
   activeDiagramModel?: DiagramModel;
   activeXml?: string;
+  activeImageDataUrl?: string;
   prompt: string;
   selectedVersionId?: string;
   selectedElement?: SelectedDiagramElement;
@@ -25,6 +26,7 @@ interface EditorState {
   setActiveVersion: (versionId?: string | null) => void;
   setActiveArtifact: (artifactId?: string) => void;
   setDiagramState: (diagramModel?: DiagramModel, xml?: string) => void;
+  setActiveImageDataUrl: (dataUrl?: string) => void;
   selectVersion: (versionId?: string) => void;
   selectElement: (element?: SelectedDiagramElement) => void;
   setPendingEdgeSource: (nodeId?: string) => void;
@@ -40,6 +42,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setActiveVersion: (activeVersionId) => set({ activeVersionId: activeVersionId ?? undefined }),
   setActiveArtifact: (activeArtifactId) => set({ activeArtifactId }),
   setDiagramState: (activeDiagramModel, activeXml) => set({ activeDiagramModel, activeXml }),
+  setActiveImageDataUrl: (activeImageDataUrl) => set({ activeImageDataUrl }),
   selectVersion: (selectedVersionId) => set({ selectedVersionId }),
   selectElement: (selectedElement) => set({ selectedElement }),
   setPendingEdgeSource: (pendingEdgeSourceId) => set({ pendingEdgeSourceId })

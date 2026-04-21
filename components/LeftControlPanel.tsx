@@ -6,7 +6,6 @@ import {
   artifactDownloadUrl,
   createSession,
   editDiagram,
-  editImage,
   generateDiagram,
   generateImage,
   importDiagram
@@ -15,15 +14,6 @@ import { useEditorStore } from "@/features/session/store";
 import type { SessionHistoryResponse } from "@/features/session/types";
 import type { EditorMode } from "@/types";
 
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
 function readFileAsText(file: File) {
   return file.text();
 }
@@ -31,7 +21,6 @@ function readFileAsText(file: File) {
 export function LeftControlPanel({ history }: { history?: SessionHistoryResponse }) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const {
     mode,
@@ -46,7 +35,8 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     setActiveSession,
     setActiveVersion,
     setActiveArtifact,
-    setDiagramState
+    setDiagramState,
+    setActiveImageDataUrl
   } = useEditorStore();
 
   const invalidate = async (sessionId?: string) => {
@@ -101,23 +91,9 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setActiveArtifact(result.artifactId);
       if ("diagramModel" in result) {
         setDiagramState(result.diagramModel, result.xml);
+      } else {
+        setActiveImageDataUrl(undefined);
       }
-      await invalidate(activeSessionId);
-    },
-    onError: (err) => setError((err as Error).message)
-  });
-
-  const imageEditMutation = useMutation({
-    mutationFn: async (file: File) => {
-      if (!activeSessionId) throw new Error("Create a session before editing an image.");
-      if (!prompt.trim()) throw new Error("Enter an image edit prompt first.");
-      return editImage(activeSessionId, prompt, await readFileAsDataUrl(file), undefined, activeVersionId);
-    },
-    onSuccess: async (result) => {
-      setError(null);
-      setMode("image");
-      setActiveVersion(result.versionId);
-      setActiveArtifact(result.artifactId);
       await invalidate(activeSessionId);
     },
     onError: (err) => setError((err as Error).message)
@@ -126,8 +102,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
   const busy =
     createSessionMutation.isPending ||
     importMutation.isPending ||
-    promptMutation.isPending ||
-    imageEditMutation.isPending;
+    promptMutation.isPending;
 
   const latestArtifact = history?.artifacts.at(-1);
   const downloadId = activeArtifactId ?? latestArtifact?.id;
@@ -198,24 +173,6 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
             event.currentTarget.value = "";
           }}
         />
-        <button
-          className="h-10 border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 disabled:opacity-50"
-          disabled={!activeSessionId || busy}
-          onClick={() => imageInputRef.current?.click()}
-        >
-          Edit uploaded image
-        </button>
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) imageEditMutation.mutate(file);
-            event.currentTarget.value = "";
-          }}
-        />
       </div>
 
       {downloadId ? (
@@ -232,6 +189,12 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
         <p>Version: {activeVersionId ?? "none"}</p>
         <p>Mode: {mode}</p>
       </div>
+
+      {mode === "image" ? (
+        <div className="border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+          Upload source images, draw masks, and run localized edits from the center image workspace.
+        </div>
+      ) : null}
 
       {busy ? <div className="border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Workflow running...</div> : null}
       {error ? <div className="border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div> : null}

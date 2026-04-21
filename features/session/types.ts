@@ -73,6 +73,8 @@ export interface ImageWorkflowResult {
   versionId: string;
   parsedIntent: ParsedEditIntent;
   artifactId: string;
+  sourceArtifactId?: string;
+  maskArtifactId?: string;
   mimeType: string;
   bytes: number | null;
   revisedPrompt?: string;

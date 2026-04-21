@@ -1,102 +1,110 @@
-# Agentic-Figure-Drawing
+# OpenAI-Native Stateful Diagram and Image Editing Platform
 
-Stateful AI image editing workflow built around a FastAPI backend, a static frontend, and a ComfyUI-compatible image generation server.
+This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
 
-## What It Does
+Phase 1 establishes the foundation only. It does not yet implement the full diagram editor, image editor, or OpenAI workflow calls.
 
-- `POST /generate` creates a new image from text and opens a tracked session.
-- `POST /edit` edits the current session image or starts a new session from an uploaded image.
-- `GET /history/{session_id}` returns the full edit chain for a session.
-- `POST /undo` rolls the current image pointer back one step without destroying prior assets.
+## Tech Stack
 
-The backend stores each session on disk under `Backend/data/sessions/`, including the original image, every generated step, and metadata.
+- Next.js 14 App Router
+- React and TypeScript
+- Tailwind CSS
+- Prisma with SQLite for local prototype persistence
+- Zod for request/response validation
+- Zustand and TanStack Query reserved for frontend state work
+- OpenAI API as the only model provider for future reasoning, generation, editing, validation, and repair workflows
 
-## Local Run
+## Folder Structure
 
-1. Start your ComfyUI server and set `SERVER_URL` in your environment or `.env`.
-2. Install backend dependencies from `Backend/requirements.txt`.
-3. Run the API with `python Backend/app.py`.
-4. Serve `Frontend/` with any static file server, or use Docker Compose to launch nginx plus the API together.
+- `app/` - Next.js pages and route handlers
+- `components/` - shared UI components
+- `features/diagram/` - diagram feature modules and future UI/workflow code
+- `features/image/` - image feature modules and future UI/workflow code
+- `features/session/` - session timeline/state feature modules
+- `lib/openai/` - centralized OpenAI client and typed workflow service boundary
+- `lib/xml/` - Draw.io / diagrams.net XML utilities
+- `lib/diagram/` - structured diagram model helpers
+- `lib/storage/` - local artifact storage abstraction and persistence helpers
+- `lib/session/` - session, version, artifact metadata, history, and revert services
+- `lib/trace/` - OpenAI pipeline trace persistence helpers
+- `lib/validation/` - Zod schemas for API and workflow shapes
+- `prisma/` - Prisma schema and SQLite migrations
+- `public/` - static assets and local artifact output root
+- `tests/` - unit tests
+- `scripts/` - future maintenance or seed scripts
 
-## Docker Compose Stack
+## Setup
 
-- `docker compose up -d --build comfyui` builds and starts a GPU-enabled ComfyUI service on `http://127.0.0.1:8188`.
-- `docker compose up -d --build app` starts the frontend/backend container and points it at the Compose-managed ComfyUI service.
-- `docker compose up -d --build` starts the full stack together.
-- Put checkpoint files in `ComfyUI/models/checkpoints/` before expecting successful image generation.
-- This repo is currently configured to use `flux1-schnell-fp8.safetensors` for both prompt-only generation and image editing, while `sd_xl_base_1.0.safetensors` remains available for diagram cleanup and asset refinement tasks.
-- The local `.env` still points the non-Docker backend at `http://127.0.0.1:8188`, so a local API process can reuse the same ComfyUI container.
-- For VS Code remote sessions, repo settings now label and auto-forward `5080` (frontend), `9988` (API), and `8188` (ComfyUI).
+Install dependencies:
 
-## Local Model Upgrades
+```bash
+npm install
+```
 
-The backend now supports per-task model routing plus workflow profiles, so you do not have to use the same local model for everything.
+Create local environment config:
 
-- `MODEL_TEXT_TO_IMAGE` controls fresh image generation.
-- `MODEL_IMAGE_EDIT` controls localized image editing.
-- `MODEL_DIAGRAM_CLEANUP` controls diagram cleanup or structured diagram rendering tasks.
-- `MODEL_ASSET_REFINE` controls extracted asset cleanup/refinement.
+```bash
+cp .env.example .env
+```
 
-You can also choose a workflow family per task:
+Set `OPENAI_API_KEY` before running any OpenAI-backed workflow. Phase 1 routes do not call OpenAI yet.
 
-- `WORKFLOW_PROFILE_TEXT_TO_IMAGE`
-- `WORKFLOW_PROFILE_IMAGE_EDIT`
-- `WORKFLOW_PROFILE_DIAGRAM_CLEANUP`
-- `WORKFLOW_PROFILE_ASSET_REFINE`
+Generate the Prisma client:
 
-Supported profiles:
+```bash
+npm run prisma:generate
+```
 
-- `legacy`: safest fallback for classic SD 1.x style checkpoint workflows
-- `sdxl`: best built-in quality upgrade that works with the shipped templates
-- `sd35`: expects a custom exported ComfyUI template via `WORKFLOW_TEMPLATE_TEXT_TO_IMAGE_SD35` and/or `WORKFLOW_TEMPLATE_IMAGE_EDIT_SD35`
-- `flux`: includes a built-in local Flux Schnell text-to-image template, with optional custom FLUX templates for other tasks
-- `flux-kontext`: expects a custom edit template via `WORKFLOW_TEMPLATE_IMAGE_EDIT_FLUX_KONTEXT`
-- `qwen-image`: includes a built-in Qwen Image text-to-image workflow, but still requires the actual Qwen local weights
-- `qwen-image-edit`: includes a built-in Qwen Image Edit workflow, but still requires the actual Qwen local weights
-- `qwen-image-edit-gguf`: includes a built-in low-VRAM ComfyUI-GGUF edit workflow for quantized local Qwen Image Edit
+Run the initial SQLite migration:
 
-### Recommended Setup
+```bash
+npm run prisma:migrate -- --name init
+```
 
-- Use `flux` for both prompt-only generation and standard image editing on this machine. The shipped default is tuned to `640x640` because that has been stable on the local 8 GB RTX 4070 Laptop GPU.
-- Keep `sdxl` available for diagram cleanup and as a fallback when you want the older checkpoint-style workflow behavior.
-- Use `qwen-image-edit-gguf` when you want the strongest local Qwen edit path on this machine. The verified working local model is `Qwen-Image-Edit-2509-Q2_K.gguf`, paired with the quantized `Qwen2.5-VL-7B-Instruct-Q2_K.gguf` encoder and the Qwen image VAE.
-- Keep FLUX as the default for day-to-day speed and stability. On this machine's 8 GB GPU, native full-precision Qwen is still not a practical default.
-- Keep `legacy` as a fallback for compatibility while you are migrating.
+Start the app:
 
-### Custom Workflow Templates
+```bash
+npm run dev
+```
 
-For advanced model families, export a working ComfyUI workflow JSON and replace the editable values with placeholders:
+The app runs at `http://localhost:3000` by default.
 
-- `__MODEL__`
-- `__PROMPT__`
-- `__NEGATIVE_PROMPT__`
-- `__INPUT_IMAGE__`
-- `__WIDTH__`
-- `__HEIGHT__`
-- `__SEED__`
-- `__STEPS__`
-- `__CFG__`
-- `__SAMPLER__`
-- `__SCHEDULER__`
-- `__DENOISE__`
+## Phase 1 API Routes
 
-Then point the matching `WORKFLOW_TEMPLATE_...` env var at that JSON file.
+- `GET /api/health` - basic service health check
+- `POST /api/session/create` - create a session and initial version
+- `GET /api/session/:sessionId` - retrieve session history, artifacts, and traces
+- `POST /api/session/:sessionId/revert` - move the active session pointer to an earlier version
+- `GET /api/traces/:sessionId` - list OpenAI pipeline traces for a session
 
-### Verified Local Qwen GGUF Path
+## Persistence Model
 
-This repo now includes a working quantized Qwen edit path through `ComfyUI-GGUF`.
+The Prisma schema persists:
 
-- Model: `Qwen-Image-Edit-2509-Q2_K.gguf`
-- Profile: `qwen-image-edit-gguf`
-- Text encoder: `Qwen2.5-VL-7B-Instruct-Q2_K.gguf`
-- MM projector: `Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf`
-- VAE: `Qwen_Image-VAE.safetensors`
+- sessions
+- version history with parent-child version links
+- artifact metadata for images, diagram XML, previews, masks, and uploaded sources
+- OpenAI trace records
+- prompt/edit metadata including parsed intent and editing analysis JSON
 
-This route is slower than FLUX, but it now works locally for prompt+image edits and preserves session history correctly.
+Local artifact bytes are stored through `lib/storage` under `ARTIFACT_STORAGE_ROOT`, which defaults to `./public/artifacts`.
 
-## Frontend Notes
+## Current Limitations
 
-- Prompt Only starts a fresh text-to-image session.
-- Prompt + Image starts from an uploaded raster image.
-- `.drawio` files can be imported into editable diagram mode.
-- The frontend now exposes both `Processing Mode` and `Workflow Profile`, so you can keep image editing local while routing higher-quality tasks through stronger local workflows.
+- Full OpenAI workflows are intentionally not implemented in Phase 1.
+- Diagram XML parsing is limited to a lightweight shape validator and empty model factory.
+- The frontend is a scaffold page, not the final editor UI.
+- Direct diagram editing, image editing, mask drawing, and download/export flows are reserved for later phases.
+
+## Phase 2 Direction
+
+Phase 2 should build on this foundation by implementing the first real OpenAI-native workflow slices:
+
+- diagram XML import into `DiagramModel`
+- prompt-to-`ParsedEditIntent` through the OpenAI service layer
+- trace-wrapped OpenAI calls for each pipeline stage
+- deterministic diagram model updates where possible
+- Draw.io XML validation/repair
+- minimal frontend session creation and history display
+
+Keep all model-backed behavior inside `lib/openai` workflows and persist every meaningful output through the session/version infrastructure.

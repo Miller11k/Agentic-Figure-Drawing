@@ -144,6 +144,29 @@ export function applyDirectDiagramEdits(
     if (operation.type === "delete-edge") {
       model.edges = model.edges.filter((edge) => edge.id !== operation.edgeId);
     }
+
+    if (operation.type === "reconnect-edge") {
+      const edge = model.edges.find((candidate) => candidate.id === operation.edgeId);
+      const nodeIds = new Set(model.nodes.map((node) => node.id));
+
+      if (!edge) {
+        throw new Error(`Edge ${operation.edgeId} was not found.`);
+      }
+
+      if (operation.sourceId) {
+        if (!nodeIds.has(operation.sourceId)) {
+          throw new Error(`Source node ${operation.sourceId} was not found.`);
+        }
+        edge.sourceId = operation.sourceId;
+      }
+
+      if (operation.targetId) {
+        if (!nodeIds.has(operation.targetId)) {
+          throw new Error(`Target node ${operation.targetId} was not found.`);
+        }
+        edge.targetId = operation.targetId;
+      }
+    }
   }
 
   model.normalized = {

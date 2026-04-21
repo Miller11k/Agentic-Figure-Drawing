@@ -248,6 +248,12 @@ export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("delete-edge"),
     edgeId: z.string().min(1)
+  }),
+  z.object({
+    type: z.literal("reconnect-edge"),
+    edgeId: z.string().min(1),
+    sourceId: z.string().min(1).optional(),
+    targetId: z.string().min(1).optional()
   })
 ]);
 

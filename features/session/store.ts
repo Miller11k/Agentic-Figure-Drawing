@@ -1,7 +1,12 @@
 "use client";
 
 import { create } from "zustand";
-import type { DiagramModel, EditorMode } from "@/types";
+import type { DiagramModel, EditorMode, EditTargetType } from "@/types";
+
+export interface SelectedDiagramElement {
+  id: string;
+  type: Extract<EditTargetType, "node" | "edge" | "group">;
+}
 
 interface EditorState {
   mode: EditorMode;
@@ -12,6 +17,8 @@ interface EditorState {
   activeXml?: string;
   prompt: string;
   selectedVersionId?: string;
+  selectedElement?: SelectedDiagramElement;
+  pendingEdgeSourceId?: string;
   setMode: (mode: EditorMode) => void;
   setPrompt: (prompt: string) => void;
   setActiveSession: (sessionId: string, versionId?: string | null) => void;
@@ -19,6 +26,8 @@ interface EditorState {
   setActiveArtifact: (artifactId?: string) => void;
   setDiagramState: (diagramModel?: DiagramModel, xml?: string) => void;
   selectVersion: (versionId?: string) => void;
+  selectElement: (element?: SelectedDiagramElement) => void;
+  setPendingEdgeSource: (nodeId?: string) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -31,5 +40,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setActiveVersion: (activeVersionId) => set({ activeVersionId: activeVersionId ?? undefined }),
   setActiveArtifact: (activeArtifactId) => set({ activeArtifactId }),
   setDiagramState: (activeDiagramModel, activeXml) => set({ activeDiagramModel, activeXml }),
-  selectVersion: (selectedVersionId) => set({ selectedVersionId })
+  selectVersion: (selectedVersionId) => set({ selectedVersionId }),
+  selectElement: (selectedElement) => set({ selectedElement }),
+  setPendingEdgeSource: (pendingEdgeSourceId) => set({ pendingEdgeSourceId })
 }));

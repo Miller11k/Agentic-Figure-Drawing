@@ -13,12 +13,20 @@ function JsonBlock({ value }: { value: unknown }) {
 }
 
 export function RightInspectorPanel({ history }: { history?: SessionHistoryResponse }) {
-  const { selectedVersionId, activeArtifactId } = useEditorStore();
+  const { selectedVersionId, activeArtifactId, activeDiagramModel, selectedElement } = useEditorStore();
   const selectedStep =
     history?.steps.find((step) => step.versionId === selectedVersionId) ?? history?.steps.at(-1);
   const activeArtifact =
     history?.artifacts.find((artifact) => artifact.id === activeArtifactId) ?? history?.artifacts.at(-1);
   const traces = history?.traces ?? [];
+  const selectedElementData =
+    selectedElement?.type === "node"
+      ? activeDiagramModel?.nodes.find((node) => node.id === selectedElement.id)
+      : selectedElement?.type === "edge"
+        ? activeDiagramModel?.edges.find((edge) => edge.id === selectedElement.id)
+        : selectedElement?.type === "group"
+          ? activeDiagramModel?.groups.find((group) => group.id === selectedElement.id)
+          : undefined;
 
   return (
     <aside className="flex h-full flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-white p-4">
@@ -36,6 +44,13 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
           <p>Type: {activeArtifact?.type ?? "none"}</p>
           <p>MIME: {activeArtifact?.mimeType ?? "none"}</p>
           <p>Bytes: {activeArtifact?.bytes ?? "unknown"}</p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase text-slate-500">Selected element</h2>
+        <div className="mt-3">
+          <JsonBlock value={selectedElementData ?? selectedElement ?? null} />
         </div>
       </section>
 

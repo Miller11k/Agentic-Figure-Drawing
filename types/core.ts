@@ -199,4 +199,10 @@ export type DirectDiagramEditOperation =
   | {
       type: "delete-edge";
       edgeId: string;
+    }
+  | {
+      type: "reconnect-edge";
+      edgeId: string;
+      sourceId?: string;
+      targetId?: string;
     };

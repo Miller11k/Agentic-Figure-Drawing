@@ -2,7 +2,7 @@
 
 This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
 
-Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 added the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation. Phase 4 connected the backend API layer. Phase 5 adds the main three-panel frontend shell.
+Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 added the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation. Phase 4 connected the backend API layer. Phase 5 added the main three-panel frontend shell. Phase 6 adds interactive direct diagram editing.
 
 ## Tech Stack
 
@@ -187,3 +187,19 @@ Frontend state is split across:
 - `components/EditorShell.tsx` for layout composition
 
 Advanced diagram direct manipulation and mask drawing are intentionally left for later phases.
+
+## Interactive Diagram Editing
+
+The diagram workspace supports structured direct edits against `DiagramModel`:
+
+- select nodes, edges, and groups
+- drag nodes and persist new coordinates through `/api/diagram/direct-edit`
+- edit node labels inline
+- add nodes
+- remove selected nodes or edges
+- update selected node style using swatches
+- create edges by selecting a source node and clicking a target
+- reconnect selected edge source or target
+- inspect selected element data in the right panel
+
+Each direct edit creates a new session version and persisted Draw.io XML artifact. Prompt-guided diagram editing remains available from the left prompt panel and shares the same session/version history.

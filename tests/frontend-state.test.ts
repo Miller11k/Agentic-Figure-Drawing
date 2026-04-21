@@ -17,4 +17,12 @@ describe("frontend session state", () => {
   it("builds artifact download URLs", () => {
     expect(artifactDownloadUrl("artifact_123")).toBe("/api/download/artifact_123");
   });
+
+  it("tracks selected diagram elements and pending edge source", () => {
+    useEditorStore.getState().selectElement({ type: "node", id: "node_a" });
+    useEditorStore.getState().setPendingEdgeSource("node_a");
+
+    expect(useEditorStore.getState().selectedElement).toEqual({ type: "node", id: "node_a" });
+    expect(useEditorStore.getState().pendingEdgeSourceId).toBe("node_a");
+  });
 });

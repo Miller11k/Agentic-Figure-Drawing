@@ -23,6 +23,21 @@ export interface FinishTraceInput {
   metadata?: SerializableJson;
 }
 
+export interface TracedStageInput {
+  sessionId?: string;
+  versionId?: string | null;
+  pipelineName: string;
+  stageName: string;
+  inputSummary: string;
+  modelUsed?: string;
+  metadata?: SerializableJson;
+}
+
+export interface TracedStageResult<T> {
+  result: T;
+  traceId?: string;
+}
+
 function serializeJson(value: SerializableJson | null | undefined): string | undefined {
   if (value === null || value === undefined) {
     return undefined;
@@ -72,4 +87,56 @@ export async function listSessionTraces(sessionId: string) {
     where: { sessionId },
     orderBy: { startedAt: "asc" }
   });
+}
+
+export function summarizeForTrace(value: unknown, maxLength = 800): string {
+  const raw = typeof value === "string" ? value : JSON.stringify(value);
+
+  if (raw.length <= maxLength) {
+    return raw;
+  }
+
+  return `${raw.slice(0, maxLength - 3)}...`;
+}
+
+export async function runTracedStage<T>(
+  input: TracedStageInput,
+  operation: () => Promise<T>,
+  summarizeOutput: (result: T) => string = (result) => summarizeForTrace(result)
+): Promise<TracedStageResult<T>> {
+  if (!input.sessionId) {
+    const result = await operation();
+    return { result };
+  }
+
+  const trace = await startTrace({
+    sessionId: input.sessionId,
+    versionId: input.versionId,
+    pipelineName: input.pipelineName,
+    stageName: input.stageName,
+    inputSummary: input.inputSummary,
+    modelUsed: input.modelUsed,
+    metadata: input.metadata
+  });
+
+  try {
+    const result = await operation();
+
+    await finishTrace({
+      traceId: trace.id,
+      status: "success",
+      outputSummary: summarizeOutput(result)
+    });
+
+    return { result, traceId: trace.id };
+  } catch (error) {
+    await finishTrace({
+      traceId: trace.id,
+      status: "error",
+      outputSummary: null,
+      errorMessage: (error as Error).message
+    });
+
+    throw error;
+  }
 }

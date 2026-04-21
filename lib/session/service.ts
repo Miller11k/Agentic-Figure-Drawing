@@ -32,6 +32,16 @@ export interface AttachArtifactInput {
   metadata?: SerializableJson;
 }
 
+export interface UpdateVersionStructuredStateInput {
+  versionId: string;
+  parsedIntent?: SerializableJson | null;
+  editingAnalysis?: SerializableJson | null;
+  diagramModel?: SerializableJson | null;
+  imageMetadata?: SerializableJson | null;
+  metadata?: SerializableJson | null;
+  previewArtifactId?: string | null;
+}
+
 function stepTypeToDb(stepType: SessionStepType) {
   return stepType === "direct-edit" ? "direct_edit" : stepType;
 }
@@ -133,6 +143,20 @@ export async function attachArtifact(input: AttachArtifactInput) {
       bytes: input.bytes,
       checksum: input.checksum,
       metadata: serializeJson(input.metadata)
+    }
+  });
+}
+
+export async function updateVersionStructuredState(input: UpdateVersionStructuredStateInput) {
+  return prisma.version.update({
+    where: { id: input.versionId },
+    data: {
+      parsedIntent: serializeJson(input.parsedIntent),
+      editingAnalysis: serializeJson(input.editingAnalysis),
+      diagramModel: serializeJson(input.diagramModel),
+      imageMetadata: serializeJson(input.imageMetadata),
+      metadata: serializeJson(input.metadata),
+      previewArtifactId: input.previewArtifactId ?? undefined
     }
   });
 }

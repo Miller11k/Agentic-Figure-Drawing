@@ -149,6 +149,51 @@ export const editingAnalysisSchema = z.object({
   executionRoute: z.enum(["diagram-xml", "diagram-model", "image-generation", "image-edit"])
 });
 
+export const diagramTargetAnalysisSchema = z.object({
+  matchedTargets: z.array(
+    z.object({
+      id: z.string(),
+      targetType: editTargetTypeSchema,
+      label: z.string().optional(),
+      confidence: z.number().min(0).max(1),
+      reason: z.string()
+    })
+  ),
+  unmatchedSelectors: z.array(z.string()),
+  ambiguityFlags: z.array(z.string()),
+  notes: z.array(z.string())
+});
+
+export const xmlStringResponseSchema = z.object({
+  xml: z.string().min(1)
+});
+
+export const xmlValidationRepairResponseSchema = z.object({
+  xml: z.string().min(1),
+  repairApplied: z.boolean(),
+  notes: z.array(z.string())
+});
+
+export const diagramGenerateWorkflowRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  prompt: z.string().min(1),
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
+export const diagramEditWorkflowRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  prompt: z.string().min(1),
+  existingXml: z.string().min(1),
+  diagramModel: diagramModelSchema,
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
+export const imageGenerateWorkflowRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  prompt: z.string().min(1),
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
 export const createSessionRequestSchema = z.object({
   title: z.string().min(1).max(160).optional(),
   initialMode: editorModeSchema.default("diagram")

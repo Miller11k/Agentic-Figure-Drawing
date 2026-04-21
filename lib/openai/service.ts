@@ -1,66 +1,171 @@
-import type { DiagramModel, DiagramSpec, EditingAnalysis, EditorMode, ParsedEditIntent } from "@/types";
+import type {
+  DiagramModel,
+  DiagramSpec,
+  DiagramTargetAnalysis,
+  EditingAnalysis,
+  EditorMode,
+  ParsedEditIntent
+} from "@/types";
+import {
+  diagramSpecSchema,
+  diagramTargetAnalysisSchema,
+  editingAnalysisSchema,
+  parsedEditIntentSchema,
+  xmlStringResponseSchema,
+  xmlValidationRepairResponseSchema
+} from "@/lib/validation/schemas";
+import {
+  analyzeDiagramTargetsPrompt,
+  diagramXmlFromSpecPrompt,
+  generateDiagramSpecPrompt,
+  parseEditIntentPrompt,
+  planDiagramEditsPrompt,
+  summarizeArtifactChangesPrompt,
+  transformDiagramXmlPrompt,
+  validateAndRepairDiagramXmlPrompt
+} from "./prompts";
+import { defaultOpenAIClientAdapter } from "./client";
+import { parseStructuredJson } from "./json";
+import type {
+  OpenAIClientAdapter,
+  OpenAIImageResult,
+  OpenAIStageContext,
+  OpenAIWorkflowService,
+  ValidationRepairResult
+} from "./types";
 
-function notImplemented(methodName: string): never {
-  throw new Error(`${methodName} is a Phase 2 OpenAI workflow and is not implemented in Phase 1.`);
+function stageName(context: OpenAIStageContext | undefined, fallback: string): string {
+  return context?.stageName ?? fallback;
 }
 
-export interface OpenAIWorkflowService {
-  parseEditIntent(prompt: string, mode: EditorMode): Promise<ParsedEditIntent>;
-  analyzeDiagramTargets(diagramModel: DiagramModel, parsedIntent: ParsedEditIntent): Promise<unknown>;
-  planDiagramEdits(
+function pipelineName(context: OpenAIStageContext | undefined, fallback: string): string {
+  return context?.pipelineName ?? fallback;
+}
+
+export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
+  constructor(private readonly adapter: OpenAIClientAdapter = defaultOpenAIClientAdapter) {}
+
+  async parseEditIntent(
+    prompt: string,
+    mode: EditorMode,
+    context?: OpenAIStageContext
+  ): Promise<ParsedEditIntent> {
+    const prompts = parseEditIntentPrompt(prompt, mode);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return parsedEditIntentSchema.parse(parseStructuredJson(result.text, parsedEditIntentSchema));
+  }
+
+  async analyzeDiagramTargets(
     diagramModel: DiagramModel,
     parsedIntent: ParsedEditIntent,
-    targetAnalysis: unknown
-  ): Promise<EditingAnalysis>;
-  generateDiagramSpec(prompt: string): Promise<DiagramSpec>;
-  generateDiagramXmlFromSpec(diagramSpec: DiagramSpec): Promise<string>;
-  transformDiagramXml(existingXml: string, editPlan: EditingAnalysis): Promise<string>;
-  validateAndRepairDiagramXml(xml: string): Promise<{ xml: string; repairApplied: boolean; notes: string[] }>;
-  generateImageFromPrompt(prompt: string): Promise<Buffer>;
-  editImageWithPrompt(image: Buffer, prompt: string, mask?: Buffer): Promise<Buffer>;
-  summarizeArtifactChanges(before: unknown, after: unknown, context: unknown): Promise<string>;
+    context?: OpenAIStageContext
+  ): Promise<DiagramTargetAnalysis> {
+    const prompts = analyzeDiagramTargetsPrompt(diagramModel, parsedIntent);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return diagramTargetAnalysisSchema.parse(parseStructuredJson(result.text, diagramTargetAnalysisSchema));
+  }
+
+  async planDiagramEdits(
+    diagramModel: DiagramModel,
+    parsedIntent: ParsedEditIntent,
+    targetAnalysis: DiagramTargetAnalysis,
+    context?: OpenAIStageContext
+  ): Promise<EditingAnalysis> {
+    const prompts = planDiagramEditsPrompt(diagramModel, parsedIntent, targetAnalysis);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return editingAnalysisSchema.parse(parseStructuredJson(result.text, editingAnalysisSchema));
+  }
+
+  async generateDiagramSpec(prompt: string, context?: OpenAIStageContext): Promise<DiagramSpec> {
+    const prompts = generateDiagramSpecPrompt(prompt);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return diagramSpecSchema.parse(parseStructuredJson(result.text, diagramSpecSchema));
+  }
+
+  async generateDiagramXmlFromSpec(diagramSpec: DiagramSpec, context?: OpenAIStageContext): Promise<string> {
+    const prompts = diagramXmlFromSpecPrompt(diagramSpec);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return parseStructuredJson(result.text, xmlStringResponseSchema).xml;
+  }
+
+  async transformDiagramXml(
+    existingXml: string,
+    editPlan: EditingAnalysis,
+    context?: OpenAIStageContext
+  ): Promise<string> {
+    const prompts = transformDiagramXmlPrompt(existingXml, editPlan);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return parseStructuredJson(result.text, xmlStringResponseSchema).xml;
+  }
+
+  async validateAndRepairDiagramXml(xml: string, context?: OpenAIStageContext): Promise<ValidationRepairResult> {
+    const prompts = validateAndRepairDiagramXmlPrompt(xml);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    return parseStructuredJson(result.text, xmlValidationRepairResponseSchema);
+  }
+
+  async generateImageFromPrompt(prompt: string, context?: OpenAIStageContext): Promise<OpenAIImageResult> {
+    return this.adapter.generateImage({ prompt });
+  }
+
+  async editImageWithPrompt(
+    image: Buffer,
+    prompt: string,
+    mask?: Buffer,
+    context?: OpenAIStageContext
+  ): Promise<OpenAIImageResult> {
+    return this.adapter.editImage({ image, prompt, mask });
+  }
+
+  async summarizeArtifactChanges(
+    before: unknown,
+    after: unknown,
+    context: unknown,
+    stageContext?: OpenAIStageContext
+  ): Promise<string> {
+    const prompts = summarizeArtifactChangesPrompt(before, after, context);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "text"
+    });
+
+    return result.text.trim();
+  }
+
+  describeStage(context: OpenAIStageContext | undefined, fallbackStage: string, fallbackPipeline: string) {
+    return {
+      stageName: stageName(context, fallbackStage),
+      pipelineName: pipelineName(context, fallbackPipeline)
+    };
+  }
 }
 
-export class PhaseOneOpenAIWorkflowService implements OpenAIWorkflowService {
-  async parseEditIntent(): Promise<ParsedEditIntent> {
-    return notImplemented("parseEditIntent");
-  }
-
-  async analyzeDiagramTargets(): Promise<unknown> {
-    return notImplemented("analyzeDiagramTargets");
-  }
-
-  async planDiagramEdits(): Promise<EditingAnalysis> {
-    return notImplemented("planDiagramEdits");
-  }
-
-  async generateDiagramSpec(): Promise<DiagramSpec> {
-    return notImplemented("generateDiagramSpec");
-  }
-
-  async generateDiagramXmlFromSpec(): Promise<string> {
-    return notImplemented("generateDiagramXmlFromSpec");
-  }
-
-  async transformDiagramXml(): Promise<string> {
-    return notImplemented("transformDiagramXml");
-  }
-
-  async validateAndRepairDiagramXml(): Promise<{ xml: string; repairApplied: boolean; notes: string[] }> {
-    return notImplemented("validateAndRepairDiagramXml");
-  }
-
-  async generateImageFromPrompt(): Promise<Buffer> {
-    return notImplemented("generateImageFromPrompt");
-  }
-
-  async editImageWithPrompt(): Promise<Buffer> {
-    return notImplemented("editImageWithPrompt");
-  }
-
-  async summarizeArtifactChanges(): Promise<string> {
-    return notImplemented("summarizeArtifactChanges");
-  }
-}
-
-export const openAIWorkflowService = new PhaseOneOpenAIWorkflowService();
+export const openAIWorkflowService = new OpenAIWorkflowServiceImpl();

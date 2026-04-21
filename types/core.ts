@@ -128,6 +128,13 @@ export interface MatchedTarget {
   reason: string;
 }
 
+export interface DiagramTargetAnalysis {
+  matchedTargets: MatchedTarget[];
+  unmatchedSelectors: string[];
+  ambiguityFlags: string[];
+  notes: string[];
+}
+
 export interface OperationPlanStep {
   operation: EditActionType;
   targetIds: string[];

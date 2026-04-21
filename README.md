@@ -2,7 +2,7 @@
 
 This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
 
-Phase 1 establishes the foundation only. It does not yet implement the full diagram editor, image editor, or OpenAI workflow calls.
+Phase 1 established the persistence and project foundation. Phase 2 adds the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows.
 
 ## Tech Stack
 
@@ -22,6 +22,7 @@ Phase 1 establishes the foundation only. It does not yet implement the full diag
 - `features/image/` - image feature modules and future UI/workflow code
 - `features/session/` - session timeline/state feature modules
 - `lib/openai/` - centralized OpenAI client and typed workflow service boundary
+- `lib/workflows/` - diagram and image pipeline orchestration composed from explicit stages
 - `lib/xml/` - Draw.io / diagrams.net XML utilities
 - `lib/diagram/` - structured diagram model helpers
 - `lib/storage/` - local artifact storage abstraction and persistence helpers
@@ -89,20 +90,45 @@ The Prisma schema persists:
 
 Local artifact bytes are stored through `lib/storage` under `ARTIFACT_STORAGE_ROOT`, which defaults to `./public/artifacts`.
 
+## OpenAI Workflow Layer
+
+All model-backed operations are isolated behind `lib/openai`. Route handlers and UI code should call workflow services rather than the OpenAI SDK directly.
+
+The current service methods are:
+
+- `parseEditIntent(prompt, mode)`
+- `analyzeDiagramTargets(diagramModel, parsedIntent)`
+- `planDiagramEdits(diagramModel, parsedIntent, targetAnalysis)`
+- `generateDiagramSpec(prompt)`
+- `generateDiagramXmlFromSpec(diagramSpec)`
+- `transformDiagramXml(existingXml, editPlan)`
+- `validateAndRepairDiagramXml(xml)`
+- `generateImageFromPrompt(prompt)`
+- `editImageWithPrompt(image, prompt, mask?)`
+- `summarizeArtifactChanges(before, after, context)`
+
+The orchestration layer in `lib/workflows` composes these into:
+
+- diagram generation
+- diagram editing
+- image generation
+- image editing
+
+Each OpenAI-backed stage is intended to write a trace record with session id, version id, pipeline name, stage name, input/output summaries, model name, status, and timing.
+
 ## Current Limitations
 
-- Full OpenAI workflows are intentionally not implemented in Phase 1.
+- OpenAI wrappers are implemented, but most workflows still need real UI/API route entry points.
 - Diagram XML parsing is limited to a lightweight shape validator and empty model factory.
 - The frontend is a scaffold page, not the final editor UI.
 - Direct diagram editing, image editing, mask drawing, and download/export flows are reserved for later phases.
 
-## Phase 2 Direction
+## Phase 3 Direction
 
-Phase 2 should build on this foundation by implementing the first real OpenAI-native workflow slices:
+Phase 3 should build on this foundation by implementing the first user-facing workflow slices:
 
 - diagram XML import into `DiagramModel`
-- prompt-to-`ParsedEditIntent` through the OpenAI service layer
-- trace-wrapped OpenAI calls for each pipeline stage
+- API routes for diagram generation/editing and image generation/editing
 - deterministic diagram model updates where possible
 - Draw.io XML validation/repair
 - minimal frontend session creation and history display

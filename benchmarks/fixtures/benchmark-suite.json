@@ -1,0 +1,64 @@
+{
+  "name": "OpenAI-native diagram and image editing benchmark fixtures",
+  "version": 1,
+  "xmlCompatibility": [
+    {
+      "id": "grouped-mixed-style-roundtrip",
+      "file": "benchmarks/fixtures/xml-compatibility.drawio",
+      "expected": {
+        "minNodes": 3,
+        "minEdges": 2,
+        "minGroups": 1,
+        "preserveLabels": ["Frontend", "Backend API", "Database", "Runtime"]
+      }
+    }
+  ],
+  "editQuality": [
+    {
+      "id": "rename-and-recolor-storage",
+      "prompt": "Rename Database to User Store and color it blue.",
+      "expectedSignals": ["node label changes without changing unrelated labels", "updated XML remains valid", "new version is created"]
+    },
+    {
+      "id": "add-cache-and-route",
+      "prompt": "Add a Cache between Backend API and Database, then connect Backend API to Cache and Cache to Database.",
+      "expectedSignals": ["new node has stable id", "connectors reference existing nodes", "layout remains readable"]
+    }
+  ],
+  "latency": [
+    {
+      "id": "diagram-generation-latency",
+      "workflow": "diagram-generation",
+      "prompt": "Generate a four-node event-driven order processing diagram.",
+      "targetP95Ms": 30000,
+      "traceStages": ["generate-diagram-spec", "spec-to-diagram-model", "diagram-model-to-xml", "validate-and-repair-xml"]
+    },
+    {
+      "id": "prompt-edit-latency",
+      "workflow": "diagram-editing",
+      "prompt": "Rename Backend API to Edge API.",
+      "targetP95Ms": 45000,
+      "traceStages": ["parse-edit-intent", "analyze-diagram-targets", "plan-diagram-edits", "transform-diagram-xml", "validate-and-repair-xml"]
+    }
+  ],
+  "recoverability": [
+    {
+      "id": "missing-root-repair",
+      "file": "benchmarks/fixtures/recoverability-missing-root.xml",
+      "expectedSignals": ["repairApplied is true", "root wrapper is inserted", "result imports into DiagramModel"]
+    },
+    {
+      "id": "revert-after-direct-edit",
+      "workflow": "session-revert",
+      "expectedSignals": ["revert creates a new version", "target artifacts are visible on revert version", "old versions remain unchanged"]
+    }
+  ],
+  "imageMasking": [
+    {
+      "id": "localized-mask-edit",
+      "source": "public/samples/demo-source-image.svg",
+      "prompt": "Make the masked region look like brushed teal glass.",
+      "expectedSignals": ["mask coordinates match image pixels", "mask artifact is persisted", "edited image artifact is downloadable"]
+    }
+  ]
+}

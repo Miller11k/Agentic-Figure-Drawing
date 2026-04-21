@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildImageEditPayload, hasMaskPixels, normalizeCanvasPoint } from "../lib/image/mask";
+import {
+  buildImageEditPayload,
+  clampBrushSize,
+  clampMaskOpacity,
+  describeMaskRequest,
+  hasMaskPixels,
+  maskExportFileName,
+  maskCompositeOperation,
+  maskStrokeStyle,
+  normalizeCanvasPoint
+} from "../lib/image/mask";
 
 describe("image mask helpers", () => {
   it("normalizes pointer coordinates into natural image coordinates", () => {
@@ -45,5 +55,35 @@ describe("image mask helpers", () => {
     });
 
     expect(payload.maskBase64).toBe("data:image/png;base64,mask");
+  });
+
+  it("normalizes brush settings for mask tooling", () => {
+    expect(clampBrushSize(500)).toBe(120);
+    expect(clampBrushSize(2)).toBe(8);
+    expect(clampMaskOpacity(2)).toBe(0.9);
+    expect(maskCompositeOperation("erase")).toBe("destination-out");
+    expect(maskStrokeStyle(0.333)).toBe("rgba(20, 184, 166, 0.33)");
+  });
+
+  it("describes mask request geometry for traceable localized edits", () => {
+    const metadata = describeMaskRequest({
+      imageSize: { width: 1000, height: 500 },
+      displaySize: { width: 500, height: 250 },
+      brushSize: 42,
+      mode: "paint",
+      maskBase64: "data:image/png;base64,mask"
+    });
+
+    expect(metadata).toMatchObject({
+      scaleX: 2,
+      scaleY: 2,
+      brushSize: 42,
+      hasMask: true
+    });
+  });
+
+  it("builds stable mask export file names", () => {
+    expect(maskExportFileName("overlay", "cmo8x5hou0000ns34fjhdh8u6")).toBe("overlay-cmo8x5ho.png");
+    expect(maskExportFileName("openai-mask")).toBe("openai-mask-local.png");
   });
 });

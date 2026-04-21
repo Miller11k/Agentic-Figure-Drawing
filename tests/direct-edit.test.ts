@@ -65,4 +65,28 @@ describe("direct diagram edits", () => {
       applyDirectDiagramEdits(model(), [{ type: "reconnect-edge", edgeId: "edge_ab", targetId: "missing" }])
     ).toThrow("Target node missing was not found.");
   });
+
+  it("supports group creation, membership changes, and group styling", () => {
+    const edited = applyDirectDiagramEdits(model(), [
+      { type: "add-group", group: { id: "group_1", label: "Runtime", nodeIds: ["node_a"] } },
+      { type: "set-node-group", nodeId: "node_b", groupId: "group_1" },
+      { type: "update-group", groupId: "group_1", style: { fillColor: "#eff6ff" } }
+    ]);
+
+    expect(edited.groups[0]).toMatchObject({
+      id: "group_1",
+      label: "Runtime",
+      nodeIds: ["node_a", "node_b"]
+    });
+    expect(edited.groups[0].style.fillColor).toBe("#eff6ff");
+    expect(edited.groups[0].boundingBox?.width).toBeGreaterThan(100);
+  });
+
+  it("updates edge style through direct edits", () => {
+    const edited = applyDirectDiagramEdits(model(), [
+      { type: "update-edge-style", edgeId: "edge_ab", style: { strokeColor: "#2563eb" } }
+    ]);
+
+    expect(edited.edges[0].style.strokeColor).toBe("#2563eb");
+  });
 });

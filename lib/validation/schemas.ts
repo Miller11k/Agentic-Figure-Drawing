@@ -250,10 +250,40 @@ export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
     edgeId: z.string().min(1)
   }),
   z.object({
+    type: z.literal("update-edge-style"),
+    edgeId: z.string().min(1),
+    style: z.record(z.unknown())
+  }),
+  z.object({
     type: z.literal("reconnect-edge"),
     edgeId: z.string().min(1),
     sourceId: z.string().min(1).optional(),
     targetId: z.string().min(1).optional()
+  }),
+  z.object({
+    type: z.literal("add-group"),
+    group: z.object({
+      id: z.string().optional(),
+      label: z.string().min(1),
+      nodeIds: z.array(z.string().min(1)).optional(),
+      style: z.record(z.unknown()).optional()
+    })
+  }),
+  z.object({
+    type: z.literal("update-group"),
+    groupId: z.string().min(1),
+    label: z.string().min(1).optional(),
+    style: z.record(z.unknown()).optional()
+  }),
+  z.object({
+    type: z.literal("delete-group"),
+    groupId: z.string().min(1),
+    ungroupNodes: z.boolean().optional()
+  }),
+  z.object({
+    type: z.literal("set-node-group"),
+    nodeId: z.string().min(1),
+    groupId: z.string().min(1).optional()
   })
 ]);
 

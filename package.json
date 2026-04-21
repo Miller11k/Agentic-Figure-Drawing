@@ -5,12 +5,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:isolated": "node scripts/build-isolated.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
+    "seed:demo": "node scripts/seed-demo.mjs",
     "test": "vitest run"
   },
   "dependencies": {

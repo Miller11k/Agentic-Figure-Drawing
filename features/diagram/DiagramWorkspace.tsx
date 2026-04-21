@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { directEditDiagram } from "@/features/session/api";
 import { useEditorStore } from "@/features/session/store";
+import { applyDiagramLayout, pointsToSvgPath, routeOrthogonalEdge, type DiagramLayoutMode } from "@/lib/diagram/layout";
 import type { BoundingBox, DiagramEdgeModel, DiagramModel, DiagramNodeModel, DirectDiagramEditOperation } from "@/types";
 
 const DEFAULT_BOX: BoundingBox = { x: 80, y: 80, width: 150, height: 70 };
@@ -65,6 +66,7 @@ export function DiagramWorkspace({ diagramModel }: { diagramModel?: DiagramModel
   const [draftModel, setDraftModel] = useState<DiagramModel | undefined>(diagramModel);
   const [error, setError] = useState<string | null>(null);
   const [reconnectMode, setReconnectMode] = useState<"source" | "target" | null>(null);
+  const [layoutMode, setLayoutMode] = useState<DiagramLayoutMode>("hierarchical");
   const {
     activeSessionId,
     activeVersionId,
@@ -201,6 +203,24 @@ export function DiagramWorkspace({ diagramModel }: { diagramModel?: DiagramModel
     });
   };
 
+  const autoLayout = (mode: DiagramLayoutMode = layoutMode) => {
+    const laidOut = applyDiagramLayout(model, mode);
+    setDraftModel(laidOut);
+    const operations = laidOut.nodes
+      .map((node) => ({ node, box: node.boundingBox }))
+      .filter((item): item is { node: DiagramNodeModel; box: BoundingBox } => Boolean(item.box))
+      .map((item) => ({
+        type: "move-node" as const,
+        nodeId: item.node.id,
+        x: item.box.x,
+        y: item.box.y
+      }));
+
+    if (operations.length > 0) {
+      directEditMutation.mutate(operations);
+    }
+  };
+
   const removeSelected = () => {
     if (selectedNode) {
       commit({ type: "delete-node", nodeId: selectedNode.id });
@@ -242,6 +262,22 @@ export function DiagramWorkspace({ diagramModel }: { diagramModel?: DiagramModel
         >
           Reconnect source
         </button>
+        <div className="flex h-9 overflow-hidden border border-slate-300 bg-white text-sm">
+          {(["hierarchical", "grid", "radial"] as const).map((mode) => (
+            <button
+              key={mode}
+              className={`px-3 capitalize ${layoutMode === mode ? "bg-teal-700 text-white" : "text-slate-700"}`}
+              onClick={() => {
+                setLayoutMode(mode);
+                autoLayout(mode);
+              }}
+              disabled={directEditMutation.isPending}
+              type="button"
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
         <div className="ml-auto flex items-center gap-2">
           {SWATCHES.map((swatch) => (
             <button
@@ -314,11 +350,7 @@ export function DiagramWorkspace({ diagramModel }: { diagramModel?: DiagramModel
             const source = nodeById.get(edge.sourceId)?.boundingBox;
             const target = nodeById.get(edge.targetId)?.boundingBox;
             if (!source || !target) return null;
-            const x1 = source.x + source.width;
-            const y1 = source.y + source.height / 2;
-            const x2 = target.x;
-            const y2 = target.y + target.height / 2;
-            const midX = (x1 + x2) / 2;
+            const route = routeOrthogonalEdge(source, target);
             const selected = selectedElement?.type === "edge" && selectedElement.id === edge.id;
             return (
               <g
@@ -328,9 +360,9 @@ export function DiagramWorkspace({ diagramModel }: { diagramModel?: DiagramModel
                   selectElement({ type: "edge", id: edge.id });
                 }}
               >
-                <path d={`M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`} fill="none" stroke={selected ? "#0f766e" : "#334155"} strokeWidth={selected ? 4 : 2} markerEnd="url(#arrow)" />
+                <path d={pointsToSvgPath(route.points)} fill="none" stroke={selected ? "#0f766e" : "#334155"} strokeWidth={selected ? 4 : 2} markerEnd="url(#arrow)" />
                 {edge.label ? (
-                  <text x={midX + 6} y={(y1 + y2) / 2 - 6} fill="#475569" fontSize="12">
+                  <text x={route.labelPoint.x} y={route.labelPoint.y} fill="#475569" fontSize="12">
                     {edge.label}
                   </text>
                 ) : null}

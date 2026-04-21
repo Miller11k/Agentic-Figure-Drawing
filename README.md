@@ -1,111 +1,79 @@
-# OpenAI-Native Stateful Diagram and Image Editing Platform
+# Agentic Figure Drawing
 
-This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
+A session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. The app supports importing Draw.io / diagrams.net XML, generating structured diagrams from prompts, prompt-guided diagram edits, direct interactive diagram edits, image generation, uploaded-image editing, localized mask edits, artifact downloads, trace inspection, version history, and metadata-layer revert.
 
-Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 added the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation. Phase 4 connected the backend API layer. Phase 5 added the main three-panel frontend shell. Phase 6 added interactive direct diagram editing. Phase 7 adds the image editor and mask-based localized edit flow.
+The implementation follows `masterspec.md` as the source of truth. OpenAI is the only AI provider used by the application; there is no ComfyUI or non-OpenAI model workflow.
 
 ## Tech Stack
 
-- Next.js 14 App Router
-- React and TypeScript
-- Tailwind CSS
-- Prisma with SQLite for local prototype persistence
-- Zod for request/response validation
-- Zustand and TanStack Query reserved for frontend state work
-- OpenAI API as the only model provider for future reasoning, generation, editing, validation, and repair workflows
+- Next.js App Router, React, TypeScript, Tailwind CSS
+- Zustand for client editing/session state
+- TanStack Query for frontend API orchestration
+- Prisma with SQLite by default
+- Draw.io / diagrams.net XML import, repair, serialization, and structured `DiagramModel` conversion
+- Local filesystem artifact storage abstraction
+- OpenAI API wrappers for structured reasoning, XML repair/editing, image generation, and image editing
+- Vitest for backend, workflow, XML, mask, and frontend request-shaping tests
 
-## Folder Structure
+## Architecture Overview
 
-- `app/` - Next.js pages and route handlers
-- `components/` - shared UI components
-- `features/diagram/` - diagram feature modules and future UI/workflow code
-- `features/image/` - image feature modules and future UI/workflow code
-- `features/session/` - session timeline/state feature modules
-- `lib/openai/` - centralized OpenAI client and typed workflow service boundary
-- `lib/workflows/` - diagram and image pipeline orchestration composed from explicit stages
-- `lib/xml/` - Draw.io / diagrams.net XML utilities
-- `lib/diagram/` - structured diagram model helpers
-- `lib/storage/` - local artifact storage abstraction and persistence helpers
-- `lib/session/` - session, version, artifact metadata, history, and revert services
-- `lib/trace/` - OpenAI pipeline trace persistence helpers
-- `lib/validation/` - Zod schemas for API and workflow shapes
-- `prisma/` - Prisma schema and SQLite migrations
-- `public/` - static assets and local artifact output root
-- `tests/` - unit tests
-- `scripts/` - future maintenance or seed scripts
+The system is organized as thin UI and API layers over reusable service modules.
 
-## Setup
+- `app/api/*` contains typed route handlers. Routes validate inputs with Zod, then delegate to services.
+- `lib/workflows/*` contains explicit multi-stage orchestration for diagram and image workflows.
+- `lib/openai/*` centralizes OpenAI client creation, model wrappers, trace-aware stage calls, response validation, and safe JSON parsing.
+- `lib/xml/drawio.ts` isolates Draw.io-compatible XML import, validation, repair, and serialization.
+- `lib/diagram/*` contains deterministic structured edit helpers and direct-edit reducers.
+- `lib/session/*` owns session, version, history, revert, prompt metadata, and trace persistence.
+- `lib/storage/*` owns artifact persistence and filesystem storage.
+- `features/*` contains frontend domain modules for session state, diagram editing, and image editing.
+- `types/core.ts` defines the shared strongly typed contracts used by backend, workflows, and UI.
 
-Install dependencies:
+The app stores every meaningful operation as a session version. Each version can point to one or more artifacts, such as Draw.io XML, diagram models, image outputs, uploads, or masks. OpenAI and deterministic workflow stages are recorded as traces so the right inspector can show what happened without exposing raw provider details.
 
-```bash
-npm install
-```
+## Major Workflows
 
-Create local environment config:
+### Diagram Import
 
-```bash
-cp .env.example .env
-```
+`POST /api/diagram/import` accepts Draw.io XML, validates and repairs it where possible, converts it into a normalized `DiagramModel`, persists XML/model artifacts, and creates a new session version.
 
-Set `OPENAI_API_KEY` before running any OpenAI-backed workflow. Phase 1 routes do not call OpenAI yet.
+### Diagram Generation
 
-Generate the Prisma client:
+`POST /api/diagram/generate` runs staged generation:
 
-```bash
-npm run prisma:generate
-```
+1. OpenAI creates a structured `DiagramSpec`.
+2. Deterministic helpers convert the spec to a `DiagramModel`.
+3. XML utilities serialize the model into Draw.io-compatible XML.
+4. Validation/repair runs before the XML is stored.
+5. Artifacts, version metadata, and traces are persisted.
 
-Run the initial SQLite migration:
+### Prompt-Guided Diagram Editing
 
-```bash
-npm run prisma:migrate -- --name init
-```
+`POST /api/diagram/edit` runs explicit stages for intent parsing, target analysis, edit planning, XML transformation, XML validation/repair, model import, artifact persistence, and change summary generation.
 
-Start the app:
+### Direct Diagram Editing
 
-```bash
-npm run dev
-```
+`POST /api/diagram/direct-edit` accepts structured direct-edit operations from the interactive canvas, applies deterministic model updates, preserves stable ids where possible, serializes to XML, stores artifacts, and creates a new version.
 
-The app runs at `http://localhost:3000` by default.
+The canvas includes hierarchical, grid, and radial deterministic layout modes plus orthogonal connector routing. The right inspector can apply node, edge, and group style palettes; assign nodes to groups; create groups from selected nodes; rename groups; and ungroup/delete groups through the same direct-edit API path.
 
-## Phase 1 API Routes
+### Image Generation
 
-## API Routes
+`POST /api/image/generate` calls the OpenAI image generation wrapper, stores the generated image artifact, creates a version, and records trace metadata.
 
-- `GET /api/health` - basic service health check
-- `POST /api/session/create` - create a session and initial version
-- `GET /api/session/:sessionId` - retrieve session history, artifacts, and traces
-- `POST /api/session/:sessionId/revert` - create a non-destructive revert version pointing at an earlier version's metadata
-- `POST /api/diagram/import` - parse Draw.io XML, persist source XML, and store a normalized `DiagramModel`
-- `POST /api/diagram/generate` - run the diagram generation workflow
-- `POST /api/diagram/edit` - run prompt-guided diagram editing
-- `POST /api/diagram/direct-edit` - apply deterministic direct edit operations to a `DiagramModel`
-- `POST /api/image/generate` - run OpenAI-backed image generation
-- `POST /api/image/edit` - run OpenAI-backed image editing with optional base64 mask
-- `POST /api/upload` - persist a generic uploaded artifact using JSON/base64 or multipart form data
-- `GET /api/artifact/:artifactId` - retrieve artifact metadata
-- `GET /api/download/:artifactId` - download artifact bytes
-- `GET /api/traces/:sessionId` - list OpenAI pipeline traces for a session
+### Image Editing and Masks
 
-## Persistence Model
+`POST /api/image/edit` supports uploaded or generated source images plus an optional mask artifact. The frontend mask editor draws directly over the rendered image and normalizes coordinates before request shaping. The backend stores edited image outputs and links mask/source metadata into version history.
 
-The Prisma schema persists:
+Mask tooling includes paint/erase modes, brush size, opacity, undo/redo, clear, preview visibility, visible overlay export, and OpenAI edit-mask export.
 
-- sessions
-- version history with parent-child version links
-- artifact metadata for images, diagram XML, previews, masks, and uploaded sources
-- OpenAI trace records
-- prompt/edit metadata including parsed intent and editing analysis JSON
+### Revert and History
 
-Local artifact bytes are stored through `lib/storage` under `ARTIFACT_STORAGE_ROOT`, which defaults to `./public/artifacts`.
+`POST /api/session/:id/revert` creates a new `revert` version that points to cloned metadata records for the target version's artifacts. It does not mutate older history. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state.
 
-## OpenAI Workflow Layer
+## OpenAI Integration Points
 
-All model-backed operations are isolated behind `lib/openai`. Route handlers and UI code should call workflow services rather than the OpenAI SDK directly.
-
-The current service methods are:
+OpenAI calls are isolated in `lib/openai/service.ts` and composed by workflow services. Current wrappers include:
 
 - `parseEditIntent(prompt, mode)`
 - `analyzeDiagramTargets(diagramModel, parsedIntent)`
@@ -118,104 +86,122 @@ The current service methods are:
 - `editImageWithPrompt(image, prompt, mask?)`
 - `summarizeArtifactChanges(before, after, context)`
 
-The orchestration layer in `lib/workflows` composes these into:
+Structured text outputs are parsed through safe JSON helpers and validated with Zod before workflow code uses them. Empty or invalid structured responses fail fast and are traced. XML repair has deterministic fallback behavior for malformed or partial Draw.io documents.
 
-- diagram generation
-- diagram editing
-- image generation
-- image editing
+## Setup
 
-Each OpenAI-backed stage is intended to write a trace record with session id, version id, pipeline name, stage name, input/output summaries, model name, status, and timing.
+Install dependencies:
 
-## Current Limitations
+```bash
+npm install
+```
 
-- OpenAI wrappers are implemented, but most workflows still need real UI/API route entry points.
-- Diagram XML support targets a practical uncompressed Draw.io subset, not every diagrams.net feature.
-- The frontend is a scaffold page, not the final editor UI.
-- Direct diagram editing, image editing, mask drawing, and download/export flows are reserved for later phases.
+Create your local environment file:
 
-## Phase 4 Direction
+```bash
+cp .env.example .env
+```
 
-Phase 5 should build on this foundation by implementing the first user-facing workflow slices:
+Set at least:
 
-- a browser UI for session creation and session history
-- diagram XML upload/import controls
-- prompt controls wired to diagram and image generation/editing routes
-- a basic diagram preview using the normalized `DiagramModel`
-- artifact download buttons
-- trace/debug panel rendering `/api/traces/:sessionId`
+```bash
+OPENAI_API_KEY="your-openai-api-key"
+DATABASE_URL="file:./dev.db"
+```
 
-Keep all model-backed behavior inside `lib/openai` workflows and persist every meaningful output through the session/version infrastructure.
+Optional model and storage settings are documented in `.env.example`.
 
-## Structured Diagram XML Pipeline
+Generate the Prisma client and run migrations:
 
-Draw.io XML is treated as a first-class artifact. The current deterministic pipeline is:
+```bash
+npm run prisma:generate
+npm run prisma:migrate
+```
 
-1. Import `.drawio` / diagrams.net XML.
-2. Parse common `mxCell` records from `<mxGraphModel><root>`.
-3. Normalize vertices into `DiagramModel.nodes`.
-4. Normalize edges into `DiagramModel.edges`.
-5. Detect practical groups from swimlane/container-like vertex cells or parent-child structure.
-6. Preserve ids, labels, raw style strings, parent/group links, connector endpoints, and geometry where available.
-7. Convert `DiagramSpec` into `DiagramModel` with deterministic stable ids and grid placement.
-8. Serialize `DiagramModel` back to Draw.io-compatible XML.
-9. Validate root/layer cells and connector references, with lightweight repair for missing root/layer cells.
+Start the app:
 
-The sample diagram at `public/samples/basic.drawio` is used by the round-trip tests.
+```bash
+npm run dev
+```
 
-Compatibility limits:
+Then open `http://localhost:3000`.
 
-- The parser targets uncompressed Draw.io XML containing `mxGraphModel` and `mxCell` elements.
-- Compressed diagrams.net payloads are not decoded yet.
-- Advanced shapes, nested geometry points, edge waypoints, pages, custom libraries, and style semantics are preserved only as raw style/metadata where practical.
-- Group detection is heuristic and focused on swimlanes, containers, and parent-child relationships.
-- The serializer emits clean prototype-friendly XML rather than byte-for-byte preserving the original file.
+## Useful Commands
 
-## Frontend Shell
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run build:isolated
+npm run seed:demo
+npm run prisma:studio
+```
 
-The home page now renders a stateful editing shell with:
+On Windows or when a dev server is already holding `.next`, use `npm run build:isolated`. The project config respects `NEXT_DIST_DIR` and `.next-build/` is ignored by git.
 
-- left control panel for session creation, mode toggle, prompt entry, diagram XML import, image upload/edit, and artifact download
-- center workspace that previews normalized `DiagramModel` content as SVG or displays the active image artifact
-- right inspector panel with session history, revert actions, active artifact metadata, parsed intent, execution summary, and trace/debug entries
+`npm run seed:demo` creates a local presentation session with a sample Draw.io diagram and SVG image artifact. It writes artifact bytes under `public/artifacts/`, which is intentionally git-ignored.
 
-Frontend state is split across:
+## API Surface
 
-- `features/session/api.ts` for typed route integration
-- `features/session/store.ts` for active editor state with Zustand
-- `components/providers.tsx` for TanStack Query
-- `components/EditorShell.tsx` for layout composition
+- `POST /api/session/create`
+- `GET /api/session/:id`
+- `POST /api/session/:id/revert`
+- `POST /api/diagram/import`
+- `POST /api/diagram/generate`
+- `POST /api/diagram/edit`
+- `POST /api/diagram/direct-edit`
+- `POST /api/image/generate`
+- `POST /api/image/edit`
+- `POST /api/upload`
+- `GET /api/artifact/:id`
+- `GET /api/download/:id`
+- `GET /api/traces/:sessionId`
 
-Advanced diagram direct manipulation and mask drawing are intentionally left for later phases.
+## Testing Status
 
-## Interactive Diagram Editing
+The test suite covers:
 
-The diagram workspace supports structured direct edits against `DiagramModel`:
+- OpenAI wrapper response validation and safe structured parsing
+- trace creation
+- Draw.io XML import, repair, and round-trip behavior
+- deterministic diagram layout and connector routing
+- direct diagram edit operations
+- backend route flows for session, diagram, image, upload, artifact, and traces
+- image mask coordinate normalization
+- mask brush settings and localized edit request metadata
+- frontend image edit request shaping
+- session history and revert metadata behavior
 
-- select nodes, edges, and groups
-- drag nodes and persist new coordinates through `/api/diagram/direct-edit`
-- edit node labels inline
-- add nodes
-- remove selected nodes or edges
-- update selected node style using swatches
-- create edges by selecting a source node and clicking a target
-- reconnect selected edge source or target
-- inspect selected element data in the right panel
+Run `npm test` before presenting or extending the prototype.
 
-Each direct edit creates a new session version and persisted Draw.io XML artifact. Prompt-guided diagram editing remains available from the left prompt panel and shares the same session/version history.
+## Report Artifacts
 
-## Image Editing Workspace
+Report-ready descriptions for the system architecture diagram, internal data-flow diagram, session history/versioning diagram, evaluation workflow figure, evaluation plan, limitations, and future work are in `docs/report-artifacts.md`.
 
-The image workspace supports:
+Local fixtures for report screenshots and repeatable demos live in `public/samples/`:
 
-- generated image preview through stored artifacts
-- source image upload for prompt-based editing
-- mask drawing directly over the rendered image
-- natural-image coordinate alignment for mask strokes
-- brush size control
-- mask undo/redo
-- clear mask
-- prompt-based image editing with optional localized mask submission
-- download of the active image artifact
+- `basic.drawio`
+- `demo-architecture.drawio`
+- `demo-source-image.svg`
+- `evaluation-fixtures.json`
 
-For OpenAI image edits, the visible teal brush overlay is converted into an API-compatible PNG mask where the drawn region becomes transparent. Image edit versions persist the uploaded source image, optional mask artifact, and final edited image artifact in session history.
+Benchmark-oriented fixtures live in `benchmarks/fixtures/`:
+
+- `benchmark-suite.json`
+- `xml-compatibility.drawio`
+- `recoverability-missing-root.xml`
+
+## Known Limitations
+
+- The diagram canvas supports practical interactive edits, layout modes, edge routing, and inspector-driven style/group edits, but it is not a full diagrams.net replacement.
+- Draw.io XML compatibility focuses on common `mxCell` node, edge, group, label, style, and geometry structures. Exotic diagrams.net features may round-trip as metadata or require repair.
+- OpenAI image generation/editing depends on account model access and provider-side latency.
+- Revert is metadata-layer revert: it creates a new version that references the selected version's artifacts rather than physically duplicating stored files.
+- The mask editor supports aligned drawing, paint/erase, opacity, undo/redo, clear, request shaping, and mask export, but does not yet include advanced selection tools such as feathering, lasso, or semantic segmentation.
+- Authentication, multi-user authorization, hosted object storage, and production observability are outside the current prototype.
+
+## Future Work
+
+- Introduce cloud artifact storage for deployment.
+- Add authenticated multi-user sessions.
+- Add automated benchmark runners for XML compatibility, edit quality, latency, and user-facing recoverability.

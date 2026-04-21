@@ -4,7 +4,17 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { artifactDownloadUrl, editImage } from "@/features/session/api";
 import { useEditorStore } from "@/features/session/store";
-import { normalizeCanvasPoint, type ImageSize } from "@/lib/image/mask";
+import {
+  clampBrushSize,
+  clampMaskOpacity,
+  describeMaskRequest,
+  maskExportFileName,
+  maskCompositeOperation,
+  maskStrokeStyle,
+  normalizeCanvasPoint,
+  type ImageSize,
+  type MaskBrushMode
+} from "@/lib/image/mask";
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -21,23 +31,48 @@ async function artifactToDataUrl(artifactId: string) {
   return readFileAsDataUrl(new File([blob], "artifact.png", { type: blob.type || "image/png" }));
 }
 
+function imageElementToPngDataUrl(image: HTMLImageElement): string {
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+
+  if (width <= 0 || height <= 0) {
+    throw new Error("Image is still loading. Try again after the image appears in the editor.");
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Could not prepare the image for editing.");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/png");
+}
+
 function drawLine(
   canvas: HTMLCanvasElement,
   from: { x: number; y: number },
   to: { x: number; y: number },
-  brushSize: number
+  brushSize: number,
+  mode: MaskBrushMode,
+  opacity: number
 ) {
   const context = canvas.getContext("2d");
   if (!context) return;
 
-  context.strokeStyle = "rgba(20, 184, 166, 0.62)";
+  context.globalCompositeOperation = maskCompositeOperation(mode);
+  context.strokeStyle = maskStrokeStyle(opacity);
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.lineWidth = brushSize;
+  context.lineWidth = clampBrushSize(brushSize);
   context.beginPath();
   context.moveTo(from.x, from.y);
   context.lineTo(to.x, to.y);
   context.stroke();
+  context.globalCompositeOperation = "source-over";
 }
 
 function exportOpenAIMask(canvas: HTMLCanvasElement): string | undefined {
@@ -76,11 +111,15 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
   const [imageSize, setImageSize] = useState<ImageSize>({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState<ImageSize>({ width: 0, height: 0 });
   const [brushSize, setBrushSize] = useState(42);
+  const [brushMode, setBrushMode] = useState<MaskBrushMode>("paint");
+  const [maskOpacity, setMaskOpacity] = useState(0.62);
+  const [showMaskPreview, setShowMaskPreview] = useState(true);
   const [drawing, setDrawing] = useState(false);
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loadedArtifactId, setLoadedArtifactId] = useState<string | undefined>();
   const {
     activeSessionId,
     activeVersionId,
@@ -100,11 +139,14 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
   }, []);
 
   useEffect(() => {
-    if (!artifactId || activeImageDataUrl) return;
+    if (!artifactId || loadedArtifactId === artifactId) return;
     artifactToDataUrl(artifactId)
-      .then(setActiveImageDataUrl)
+      .then((dataUrl) => {
+        setActiveImageDataUrl(dataUrl);
+        setLoadedArtifactId(artifactId);
+      })
       .catch(() => undefined);
-  }, [activeImageDataUrl, artifactId, setActiveImageDataUrl]);
+  }, [artifactId, loadedArtifactId, setActiveImageDataUrl]);
 
   useEffect(() => {
     window.addEventListener("resize", updateDisplaySize);
@@ -139,6 +181,30 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
     }
   };
 
+  const downloadDataUrl = (dataUrl: string, fileName: string) => {
+    const anchor = document.createElement("a");
+    anchor.href = dataUrl;
+    anchor.download = fileName;
+    anchor.click();
+  };
+
+  const downloadMaskOverlay = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    downloadDataUrl(canvas.toDataURL("image/png"), maskExportFileName("overlay", activeSessionId));
+  };
+
+  const downloadOpenAIMask = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = exportOpenAIMask(canvas);
+    if (!dataUrl) {
+      setError("Draw a mask before exporting an OpenAI edit mask.");
+      return;
+    }
+    downloadDataUrl(dataUrl, maskExportFileName("openai-mask", activeSessionId));
+  };
+
   const undo = () => {
     const canvas = canvasRef.current;
     if (!canvas || undoStack.length === 0) return;
@@ -163,11 +229,26 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
       if (!activeImageDataUrl) throw new Error("Upload or generate an image before editing.");
       if (!prompt.trim()) throw new Error("Enter an edit prompt first.");
 
+      const imageElement = imageRef.current;
+      if (!imageElement) throw new Error("No rendered image is available for editing.");
+
+      const imageBase64 = imageElementToPngDataUrl(imageElement);
+      const maskBase64 = canvasRef.current ? exportOpenAIMask(canvasRef.current) : undefined;
+      const requestMetadata = describeMaskRequest({
+        imageSize,
+        displaySize,
+        brushSize,
+        mode: brushMode,
+        maskBase64
+      });
+
+      console.info("Image edit mask request", requestMetadata);
+
       return editImage(
         activeSessionId,
         prompt,
-        activeImageDataUrl,
-        canvasRef.current ? exportOpenAIMask(canvasRef.current) : undefined,
+        imageBase64,
+        maskBase64,
         activeVersionId
       );
     },
@@ -176,7 +257,12 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
       setMode("image");
       setActiveVersion(result.versionId);
       setActiveArtifact(result.artifactId);
-      setActiveImageDataUrl(undefined);
+      setLoadedArtifactId(result.artifactId);
+      setUndoStack([]);
+      setRedoStack([]);
+      canvasRef.current?.getContext("2d")?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      const editedDataUrl = await artifactToDataUrl(result.artifactId);
+      setActiveImageDataUrl(editedDataUrl);
       await queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
     },
     onError: (err) => setError((err as Error).message)
@@ -188,13 +274,13 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
     const point = normalizeCanvasPoint(event.clientX, event.clientY, canvasRef.current.getBoundingClientRect(), imageSize);
     setDrawing(true);
     setLastPoint(point);
-    drawLine(canvasRef.current, point, point, brushSize);
+    drawLine(canvasRef.current, point, point, brushSize, brushMode, maskOpacity);
   };
 
   const continueDraw = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!drawing || !lastPoint || !canvasRef.current) return;
     const point = normalizeCanvasPoint(event.clientX, event.clientY, canvasRef.current.getBoundingClientRect(), imageSize);
-    drawLine(canvasRef.current, lastPoint, point, brushSize);
+    drawLine(canvasRef.current, lastPoint, point, brushSize, brushMode, maskOpacity);
     setLastPoint(point);
   };
 
@@ -224,7 +310,10 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
             className="hidden"
             onChange={async (event) => {
               const file = event.target.files?.[0];
-              if (file) setActiveImageDataUrl(await readFileAsDataUrl(file));
+              if (file) {
+                setActiveImageDataUrl(await readFileAsDataUrl(file));
+                setLoadedArtifactId(undefined);
+              }
               event.currentTarget.value = "";
             }}
           />
@@ -248,9 +337,36 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
             min="8"
             max="120"
             value={brushSize}
-            onChange={(event) => setBrushSize(Number(event.target.value))}
+            onChange={(event) => setBrushSize(clampBrushSize(Number(event.target.value)))}
           />
           <span className="w-8 text-right">{brushSize}</span>
+        </label>
+        <div className="flex h-9 overflow-hidden border border-slate-300 bg-white text-sm">
+          <button
+            className={`px-3 ${brushMode === "paint" ? "bg-teal-700 text-white" : "text-slate-700"}`}
+            onClick={() => setBrushMode("paint")}
+            type="button"
+          >
+            Paint
+          </button>
+          <button
+            className={`border-l border-slate-300 px-3 ${brushMode === "erase" ? "bg-teal-700 text-white" : "text-slate-700"}`}
+            onClick={() => setBrushMode("erase")}
+            type="button"
+          >
+            Erase
+          </button>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          Opacity
+          <input
+            type="range"
+            min="15"
+            max="90"
+            value={Math.round(maskOpacity * 100)}
+            onChange={(event) => setMaskOpacity(clampMaskOpacity(Number(event.target.value) / 100))}
+          />
+          <span className="w-8 text-right">{Math.round(maskOpacity * 100)}</span>
         </label>
         <button className="h-9 border border-slate-300 bg-white px-3 text-sm font-medium" onClick={undo} disabled={undoStack.length === 0}>
           Undo
@@ -260,6 +376,16 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
         </button>
         <button className="h-9 border border-slate-300 bg-white px-3 text-sm font-medium" onClick={clearMask}>
           Clear mask
+        </button>
+        <label className="flex h-9 items-center gap-2 border border-slate-300 bg-white px-3 text-sm text-slate-700">
+          <input type="checkbox" checked={showMaskPreview} onChange={(event) => setShowMaskPreview(event.target.checked)} />
+          Preview
+        </label>
+        <button className="h-9 border border-slate-300 bg-white px-3 text-sm font-medium" onClick={downloadMaskOverlay}>
+          Export overlay
+        </button>
+        <button className="h-9 border border-slate-300 bg-white px-3 text-sm font-medium" onClick={downloadOpenAIMask}>
+          Export edit mask
         </button>
         <button
           className="ml-auto h-9 border border-teal-700 bg-teal-700 px-3 text-sm font-medium text-white disabled:opacity-50"
@@ -277,6 +403,7 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
             const file = event.target.files?.[0];
             if (file) {
               setActiveImageDataUrl(await readFileAsDataUrl(file));
+              setLoadedArtifactId(undefined);
               setUndoStack([]);
               setRedoStack([]);
             }
@@ -315,7 +442,7 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
           <canvas
             ref={canvasRef}
             className="absolute left-0 top-0 touch-none"
-            style={{ width: displaySize.width, height: displaySize.height }}
+            style={{ width: displaySize.width, height: displaySize.height, opacity: showMaskPreview ? 1 : 0.08 }}
             onPointerDown={beginDraw}
             onPointerMove={continueDraw}
             onPointerUp={endDraw}

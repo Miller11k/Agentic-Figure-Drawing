@@ -148,16 +148,32 @@ export async function attachArtifact(input: AttachArtifactInput) {
 }
 
 export async function updateVersionStructuredState(input: UpdateVersionStructuredStateInput) {
-  return prisma.version.update({
-    where: { id: input.versionId },
-    data: {
-      parsedIntent: serializeJson(input.parsedIntent),
-      editingAnalysis: serializeJson(input.editingAnalysis),
-      diagramModel: serializeJson(input.diagramModel),
-      imageMetadata: serializeJson(input.imageMetadata),
-      metadata: serializeJson(input.metadata),
-      previewArtifactId: input.previewArtifactId ?? undefined
+  return prisma.$transaction(async (tx) => {
+    const parsedIntent = serializeJson(input.parsedIntent);
+    const editingAnalysis = serializeJson(input.editingAnalysis);
+    const version = await tx.version.update({
+      where: { id: input.versionId },
+      data: {
+        parsedIntent,
+        editingAnalysis,
+        diagramModel: serializeJson(input.diagramModel),
+        imageMetadata: serializeJson(input.imageMetadata),
+        metadata: serializeJson(input.metadata),
+        previewArtifactId: input.previewArtifactId ?? undefined
+      }
+    });
+
+    if (parsedIntent !== undefined || editingAnalysis !== undefined) {
+      await tx.promptEditMetadata.updateMany({
+        where: { versionId: input.versionId },
+        data: {
+          parsedIntent,
+          editingAnalysis
+        }
+      });
     }
+
+    return version;
   });
 }
 
@@ -186,7 +202,8 @@ export async function revertSessionToVersion(sessionId: string, versionId: strin
       select: { currentVersionId: true }
     });
     const target = await tx.version.findFirstOrThrow({
-      where: { id: versionId, sessionId }
+      where: { id: versionId, sessionId },
+      include: { artifacts: true }
     });
 
     const revertVersion = await tx.version.create({
@@ -207,6 +224,21 @@ export async function revertSessionToVersion(sessionId: string, versionId: strin
         previewArtifactId: target.previewArtifactId
       }
     });
+
+    for (const artifact of target.artifacts) {
+      await tx.artifact.create({
+        data: {
+          sessionId,
+          versionId: revertVersion.id,
+          type: artifact.type,
+          storagePath: artifact.storagePath,
+          mimeType: artifact.mimeType,
+          bytes: artifact.bytes,
+          checksum: artifact.checksum,
+          metadata: artifact.metadata
+        }
+      });
+    }
 
     await tx.session.update({
       where: { id: sessionId },

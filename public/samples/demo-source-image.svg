@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">Demo source image</title>
+  <desc id="desc">A simple product-photo style scene used as a local image editing seed.</desc>
+  <rect width="960" height="540" fill="#f8fafc"/>
+  <rect x="96" y="92" width="768" height="356" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="4"/>
+  <rect x="154" y="150" width="270" height="210" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="5"/>
+  <circle cx="606" cy="236" r="88" fill="#ccfbf1" stroke="#0f766e" stroke-width="5"/>
+  <path d="M540 338 C608 292 684 294 752 338" fill="none" stroke="#f97316" stroke-width="16" stroke-linecap="round"/>
+  <text x="480" y="424" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#334155">OpenAI-native edit seed</text>
+</svg>

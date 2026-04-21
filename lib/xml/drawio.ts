@@ -255,6 +255,25 @@ export function repairDrawioXml(xml: string): { xml: string; repairApplied: bool
     };
   }
 
+  if (!trimmed.includes("<root") || !trimmed.includes("</root>")) {
+    const repaired = trimmed.replace(/(<mxGraphModel\b[^>]*>)([\s\S]*?)(<\/mxGraphModel>)/, "$1<root>$2</root>$3");
+
+    if (repaired !== trimmed) {
+      notes.push("Inserted missing mxGraphModel root wrapper.");
+      return {
+        xml: repaired,
+        repairApplied: true,
+        notes
+      };
+    }
+
+    return {
+      xml: createDrawioXmlFromModel(createEmptyDiagramModel(trimmed)),
+      repairApplied: true,
+      notes: ["Replaced malformed Draw.io XML with an empty Draw.io document because mxGraphModel was incomplete."]
+    };
+  }
+
   const cells = parseMxCells(trimmed);
   const hasRoot = cells.some((cell) => cell.id === "0");
   const hasLayer = cells.some((cell) => cell.id === "1");

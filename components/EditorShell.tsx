@@ -6,6 +6,7 @@ import { LeftControlPanel } from "@/components/LeftControlPanel";
 import { DiagramWorkspace } from "@/features/diagram/DiagramWorkspace";
 import { ImageWorkspace } from "@/features/image/ImageWorkspace";
 import { getSessionHistory } from "@/features/session/api";
+import { selectVersionArtifact } from "@/features/session/artifacts";
 import { RightInspectorPanel } from "@/features/session/RightInspectorPanel";
 import { useEditorStore } from "@/features/session/store";
 
@@ -32,8 +33,8 @@ export function EditorShell() {
     }
 
     const latestStep = history.steps.find((step) => step.versionId === history.currentVersionId);
-    const latestArtifact =
-      history.artifacts.find((artifact) => artifact.versionId === history.currentVersionId) ?? history.artifacts.at(-1);
+    const artifactMode = latestStep?.mode ?? mode;
+    const latestArtifact = selectVersionArtifact(history, history.currentVersionId, artifactMode) ?? history.artifacts.at(-1);
 
     setActiveVersion(history.currentVersionId);
 

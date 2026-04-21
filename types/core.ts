@@ -201,8 +201,38 @@ export type DirectDiagramEditOperation =
       edgeId: string;
     }
   | {
+      type: "update-edge-style";
+      edgeId: string;
+      style: Record<string, unknown>;
+    }
+  | {
       type: "reconnect-edge";
       edgeId: string;
       sourceId?: string;
       targetId?: string;
+    }
+  | {
+      type: "add-group";
+      group: {
+        id?: string;
+        label: string;
+        nodeIds?: string[];
+        style?: Record<string, unknown>;
+      };
+    }
+  | {
+      type: "update-group";
+      groupId: string;
+      label?: string;
+      style?: Record<string, unknown>;
+    }
+  | {
+      type: "delete-group";
+      groupId: string;
+      ungroupNodes?: boolean;
+    }
+  | {
+      type: "set-node-group";
+      nodeId: string;
+      groupId?: string;
     };

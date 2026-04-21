@@ -31,19 +31,26 @@ export function extractJsonCandidate(rawText: string): string {
   return trimmed;
 }
 
-export function parseStructuredJson<T>(rawText: string, schema: z.ZodSchema<T>): T {
+export function parseStructuredJson<T>(
+  rawText: string,
+  schema: z.ZodSchema<T>,
+  normalize?: (value: unknown) => unknown
+): T {
   let parsed: unknown;
+  const candidate = extractJsonCandidate(rawText);
 
   try {
-    parsed = JSON.parse(extractJsonCandidate(rawText));
+    parsed = JSON.parse(candidate);
   } catch (error) {
     throw new Error(`OpenAI response was not valid JSON: ${(error as Error).message}`);
   }
 
-  const result = schema.safeParse(parsed);
+  const normalized = normalize ? normalize(parsed) : parsed;
+  const result = schema.safeParse(normalized);
 
   if (!result.success) {
-    throw new Error(`OpenAI response failed schema validation: ${result.error.message}`);
+    const snippet = candidate.slice(0, 700);
+    throw new Error(`OpenAI response failed schema validation: ${result.error.message}. Candidate JSON: ${snippet}`);
   }
 
   return result.data;

@@ -26,6 +26,15 @@ import {
 } from "./prompts";
 import { defaultOpenAIClientAdapter } from "./client";
 import { parseStructuredJson } from "./json";
+import {
+  fallbackDiagramTargetAnalysis,
+  normalizeDiagramSpec,
+  normalizeDiagramTargetAnalysis,
+  normalizeEditingAnalysis,
+  normalizeParsedEditIntent,
+  normalizeXmlStringResponse,
+  normalizeXmlValidationRepairResponse
+} from "./normalizers";
 import type {
   OpenAIClientAdapter,
   OpenAIImageResult,
@@ -42,6 +51,14 @@ function pipelineName(context: OpenAIStageContext | undefined, fallback: string)
   return context?.pipelineName ?? fallback;
 }
 
+function requireStructuredText(text: string, stageName: string): string {
+  if (!text.trim()) {
+    throw new Error(`OpenAI ${stageName} returned an empty response.`);
+  }
+
+  return text;
+}
+
 export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
   constructor(private readonly adapter: OpenAIClientAdapter = defaultOpenAIClientAdapter) {}
 
@@ -56,7 +73,11 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return parsedEditIntentSchema.parse(parseStructuredJson(result.text, parsedEditIntentSchema));
+    return parseStructuredJson(
+      requireStructuredText(result.text, "parseEditIntent"),
+      parsedEditIntentSchema,
+      (value) => normalizeParsedEditIntent(value, { prompt, mode })
+    );
   }
 
   async analyzeDiagramTargets(
@@ -70,7 +91,15 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return diagramTargetAnalysisSchema.parse(parseStructuredJson(result.text, diagramTargetAnalysisSchema));
+    try {
+      return parseStructuredJson(
+        requireStructuredText(result.text, "analyzeDiagramTargets"),
+        diagramTargetAnalysisSchema,
+        normalizeDiagramTargetAnalysis
+      );
+    } catch {
+      return fallbackDiagramTargetAnalysis(parsedIntent, diagramModel);
+    }
   }
 
   async planDiagramEdits(
@@ -85,7 +114,11 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return editingAnalysisSchema.parse(parseStructuredJson(result.text, editingAnalysisSchema));
+    return parseStructuredJson(
+      requireStructuredText(result.text, "planDiagramEdits"),
+      editingAnalysisSchema,
+      (value) => normalizeEditingAnalysis(value, { parsedIntent, targetAnalysis })
+    );
   }
 
   async generateDiagramSpec(prompt: string, context?: OpenAIStageContext): Promise<DiagramSpec> {
@@ -95,7 +128,11 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return diagramSpecSchema.parse(parseStructuredJson(result.text, diagramSpecSchema));
+    return parseStructuredJson(
+      requireStructuredText(result.text, "generateDiagramSpec"),
+      diagramSpecSchema,
+      (value) => normalizeDiagramSpec(value, prompt)
+    );
   }
 
   async generateDiagramXmlFromSpec(diagramSpec: DiagramSpec, context?: OpenAIStageContext): Promise<string> {
@@ -105,7 +142,11 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return parseStructuredJson(result.text, xmlStringResponseSchema).xml;
+    return parseStructuredJson(
+      requireStructuredText(result.text, "generateDiagramXmlFromSpec"),
+      xmlStringResponseSchema,
+      normalizeXmlStringResponse
+    ).xml;
   }
 
   async transformDiagramXml(
@@ -119,7 +160,11 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return parseStructuredJson(result.text, xmlStringResponseSchema).xml;
+    return parseStructuredJson(
+      requireStructuredText(result.text, "transformDiagramXml"),
+      xmlStringResponseSchema,
+      normalizeXmlStringResponse
+    ).xml;
   }
 
   async validateAndRepairDiagramXml(xml: string, context?: OpenAIStageContext): Promise<ValidationRepairResult> {
@@ -129,7 +174,11 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       responseFormat: "json_object"
     });
 
-    return parseStructuredJson(result.text, xmlValidationRepairResponseSchema);
+    return parseStructuredJson(
+      requireStructuredText(result.text, "validateAndRepairDiagramXml"),
+      xmlValidationRepairResponseSchema,
+      (value) => normalizeXmlValidationRepairResponse(value, xml)
+    );
   }
 
   async generateImageFromPrompt(prompt: string, context?: OpenAIStageContext): Promise<OpenAIImageResult> {

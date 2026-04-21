@@ -1,6 +1,7 @@
 .env
 .env.local
 .next/
+.next-build/
 node_modules/
 dist/
 coverage/

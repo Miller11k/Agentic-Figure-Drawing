@@ -1,0 +1,24 @@
+{
+  "diagramPrompts": [
+    "Generate a three-tier web architecture with client, API, worker, and database nodes.",
+    "Rename API Gateway to Edge Router.",
+    "Add a cache between the API and User Store.",
+    "Connect Worker Service to User Store and label the edge writes."
+  ],
+  "directDiagramEdits": [
+    { "type": "rename-node", "nodeId": "api", "label": "Edge Router" },
+    { "type": "add-node", "node": { "label": "Cache", "x": 520, "y": 260 } },
+    { "type": "add-edge", "edge": { "sourceId": "api", "targetId": "store", "label": "reads" } }
+  ],
+  "imagePrompts": [
+    "Create a clean product-style hero image for a stateful diagram editor.",
+    "Make the selected masked region look like brushed teal glass."
+  ],
+  "checks": [
+    "XML validates after import and export.",
+    "Every operation creates a new session version.",
+    "Artifacts are downloadable.",
+    "Trace records are visible for OpenAI-backed stages.",
+    "Revert creates a new version and does not mutate old history."
+  ]
+}

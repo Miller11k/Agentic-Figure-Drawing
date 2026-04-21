@@ -70,7 +70,8 @@ export async function runImageGenerationPipeline(
       pipelineName: "image-generation",
       status: "completed",
       artifactId: artifact.id
-    }
+    },
+    previewArtifactId: artifact.id
   });
 
   return {
@@ -189,7 +190,8 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
       artifactId: artifact.id,
       sourceArtifactId: sourceArtifact.id,
       maskArtifactId: maskArtifact?.id
-    }
+    },
+    previewArtifactId: artifact.id
   });
 
   return {

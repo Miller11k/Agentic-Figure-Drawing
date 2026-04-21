@@ -73,7 +73,8 @@ describe("image workflow", () => {
           hasMask: true,
           sourceArtifactId: "source_artifact",
           maskArtifactId: "mask_artifact"
-        })
+        }),
+        previewArtifactId: "image_artifact"
       })
     );
     expect(result).toMatchObject({

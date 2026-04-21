@@ -6,6 +6,7 @@ import type {
   DiagramNodeModel,
   DiagramSpec
 } from "@/types";
+import { applyDiagramLayout } from "./layout";
 
 const NODE_WIDTH = 150;
 const NODE_HEIGHT = 70;
@@ -178,7 +179,7 @@ export function createDiagramModelFromSpec(spec: DiagramSpec): DiagramModel {
     };
   });
 
-  return {
+  return applyDiagramLayout({
     nodes,
     edges,
     groups,
@@ -195,5 +196,5 @@ export function createDiagramModelFromSpec(spec: DiagramSpec): DiagramModel {
       diagramType: spec.diagramType,
       source: "diagram-spec"
     }
-  };
+  }, "hierarchical");
 }

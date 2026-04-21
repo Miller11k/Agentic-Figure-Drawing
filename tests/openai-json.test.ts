@@ -21,4 +21,12 @@ describe("OpenAI structured JSON helpers", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toContain("schema validation");
   });
+
+  it("normalizes before validating when requested", () => {
+    const parsed = parseStructuredJson("{\"title\":\"diagram\"}", schema, (value) => ({
+      name: (value as { title: string }).title
+    }));
+
+    expect(parsed.name).toBe("diagram");
+  });
 });

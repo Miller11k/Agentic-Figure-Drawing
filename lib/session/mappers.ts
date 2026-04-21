@@ -6,7 +6,11 @@ function parseJsonField<T>(value: string | null): T | null {
     return null;
   }
 
-  return JSON.parse(value) as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
 
 const stepTypeFromDb = (stepType: string): SessionStep["stepType"] => {

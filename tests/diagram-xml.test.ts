@@ -85,4 +85,15 @@ describe("Draw.io XML pipeline", () => {
     expect(repaired.xml).toContain('id="0"');
     expect(repaired.xml).toContain('id="1"');
   });
+
+  it("repairs mxGraphModel XML that is missing a root wrapper", () => {
+    const broken =
+      '<mxfile><diagram name="No Root"><mxGraphModel><mxCell id="0"/><mxCell id="1" parent="0"/></mxGraphModel></diagram></mxfile>';
+    const repaired = validateAndRepairDrawioXml(broken);
+
+    expect(repaired.repairApplied).toBe(true);
+    expect(repaired.valid).toBe(true);
+    expect(repaired.xml).toContain("<root>");
+    expect(repaired.xml).toContain("</root>");
+  });
 });

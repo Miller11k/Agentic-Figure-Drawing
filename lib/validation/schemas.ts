@@ -194,6 +194,91 @@ export const imageGenerateWorkflowRequestSchema = z.object({
   parentVersionId: z.string().cuid().nullable().optional()
 });
 
+export const diagramImportRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  xml: z.string().min(1),
+  fileName: z.string().min(1).default("import.drawio"),
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
+export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("rename-node"),
+    nodeId: z.string().min(1),
+    label: z.string().min(1)
+  }),
+  z.object({
+    type: z.literal("move-node"),
+    nodeId: z.string().min(1),
+    x: z.number(),
+    y: z.number()
+  }),
+  z.object({
+    type: z.literal("add-node"),
+    node: z.object({
+      id: z.string().optional(),
+      label: z.string().min(1),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      width: z.number().optional(),
+      height: z.number().optional(),
+      groupId: z.string().optional(),
+      style: z.record(z.unknown()).optional()
+    })
+  }),
+  z.object({
+    type: z.literal("delete-node"),
+    nodeId: z.string().min(1)
+  }),
+  z.object({
+    type: z.literal("update-node-style"),
+    nodeId: z.string().min(1),
+    style: z.record(z.unknown())
+  }),
+  z.object({
+    type: z.literal("add-edge"),
+    edge: z.object({
+      id: z.string().optional(),
+      sourceId: z.string().min(1),
+      targetId: z.string().min(1),
+      label: z.string().optional(),
+      style: z.record(z.unknown()).optional()
+    })
+  }),
+  z.object({
+    type: z.literal("delete-edge"),
+    edgeId: z.string().min(1)
+  })
+]);
+
+export const diagramDirectEditWorkflowRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  diagramModel: diagramModelSchema,
+  operations: z.array(directDiagramEditOperationSchema).min(1),
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
+export const imageEditWorkflowRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  prompt: z.string().min(1),
+  imageBase64: z.string().min(1),
+  maskBase64: z.string().min(1).optional(),
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
+export const uploadRequestMetadataSchema = z.object({
+  sessionId: z.string().cuid(),
+  artifactType: z.enum(["image", "diagram_xml", "preview", "mask", "source"]).default("source"),
+  versionId: z.string().cuid().optional(),
+  mode: editorModeSchema.default("diagram"),
+  fileName: z.string().min(1).optional(),
+  mimeType: z.string().min(1).optional()
+});
+
+export const uploadJsonRequestSchema = uploadRequestMetadataSchema.extend({
+  dataBase64: z.string().min(1)
+});
+
 export const createSessionRequestSchema = z.object({
   title: z.string().min(1).max(160).optional(),
   initialMode: editorModeSchema.default("diagram")

@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
+import { handleRouteError } from "@/lib/api/responses";
 import { createSession } from "@/lib/session";
 import { createSessionRequestSchema } from "@/lib/validation/schemas";
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const parsed = createSessionRequestSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  try {
+    const body = await request.json().catch(() => ({}));
+    const parsed = createSessionRequestSchema.parse(body);
+    const result = await createSession(parsed);
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    return handleRouteError(error);
   }
-
-  const result = await createSession(parsed.data);
-  return NextResponse.json(result, { status: 201 });
 }

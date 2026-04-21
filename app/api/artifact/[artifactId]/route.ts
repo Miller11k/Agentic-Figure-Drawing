@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { handleRouteError } from "@/lib/api/responses";
-import { listSessionTraces } from "@/lib/trace";
+import { getArtifactRecord } from "@/lib/storage";
 
 interface RouteContext {
   params: {
-    sessionId: string;
+    artifactId: string;
   };
 }
 
 export async function GET(_request: Request, context: RouteContext) {
   try {
-    const traces = await listSessionTraces(context.params.sessionId);
-    return NextResponse.json({ traces });
+    const artifact = await getArtifactRecord(context.params.artifactId);
+    return NextResponse.json({ artifact });
   } catch (error) {
     return handleRouteError(error);
   }

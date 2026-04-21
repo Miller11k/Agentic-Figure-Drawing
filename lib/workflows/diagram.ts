@@ -1,15 +1,76 @@
-import { createDiagramModelFromSpec } from "@/lib/diagram";
+import { applyDirectDiagramEdits, createDiagramModelFromSpec } from "@/lib/diagram";
 import { getOpenAIModelConfig, openAIWorkflowService } from "@/lib/openai";
 import { createVersionStep, updateVersionStructuredState } from "@/lib/session";
 import { persistArtifactForVersion } from "@/lib/storage";
 import { runTracedStage, summarizeForTrace } from "@/lib/trace";
-import { createDrawioXmlFromModel, validateAndRepairDrawioXml } from "@/lib/xml";
+import {
+  createDrawioXmlFromModel,
+  parseDrawioXmlToDiagramModel,
+  validateAndRepairDrawioXml
+} from "@/lib/xml";
 import type {
+  DiagramDirectEditWorkflowInput,
+  DiagramDirectEditWorkflowResult,
   DiagramEditingWorkflowInput,
   DiagramEditingWorkflowResult,
   DiagramGenerationWorkflowInput,
-  DiagramGenerationWorkflowResult
+  DiagramGenerationWorkflowResult,
+  DiagramImportWorkflowInput,
+  DiagramImportWorkflowResult
 } from "./types";
+
+export async function runDiagramImportPipeline(
+  input: DiagramImportWorkflowInput
+): Promise<DiagramImportWorkflowResult> {
+  const version = await createVersionStep({
+    sessionId: input.sessionId,
+    parentVersionId: input.parentVersionId,
+    stepType: "upload",
+    mode: "diagram",
+    metadata: { pipelineName: "diagram-import", status: "started", fileName: input.fileName }
+  });
+
+  const validation = validateAndRepairDrawioXml(input.xml);
+
+  if (!validation.valid) {
+    throw new Error(`Imported XML is invalid: ${validation.errors.join(" ")}`);
+  }
+
+  const diagramModel = parseDrawioXmlToDiagramModel(validation.xml);
+  const artifact = await persistArtifactForVersion({
+    sessionId: input.sessionId,
+    versionId: version.id,
+    artifactType: "diagram_xml",
+    fileName: input.fileName ?? "import.drawio",
+    mimeType: "application/xml",
+    data: Buffer.from(validation.xml, "utf8"),
+    metadata: {
+      pipelineName: "diagram-import",
+      repairApplied: validation.repairApplied,
+      notes: validation.notes
+    }
+  });
+
+  await updateVersionStructuredState({
+    versionId: version.id,
+    diagramModel,
+    metadata: {
+      pipelineName: "diagram-import",
+      status: "completed",
+      artifactId: artifact.id,
+      repairApplied: validation.repairApplied
+    }
+  });
+
+  return {
+    versionId: version.id,
+    diagramModel,
+    xml: validation.xml,
+    artifactId: artifact.id,
+    repairApplied: validation.repairApplied,
+    notes: validation.notes
+  };
+}
 
 export async function runDiagramGenerationPipeline(
   input: DiagramGenerationWorkflowInput
@@ -216,5 +277,63 @@ export async function runDiagramEditingPipeline(
     xml: validation.xml,
     repairApplied: validation.repairApplied,
     artifactId: artifact.id
+  };
+}
+
+export async function runDiagramDirectEditPipeline(
+  input: DiagramDirectEditWorkflowInput
+): Promise<DiagramDirectEditWorkflowResult> {
+  const version = await createVersionStep({
+    sessionId: input.sessionId,
+    parentVersionId: input.parentVersionId,
+    stepType: "direct-edit",
+    mode: "diagram",
+    diagramModel: input.diagramModel,
+    metadata: {
+      pipelineName: "diagram-direct-edit",
+      status: "started",
+      operationCount: input.operations.length
+    }
+  });
+
+  const diagramModel = applyDirectDiagramEdits(input.diagramModel, input.operations);
+  const xml = createDrawioXmlFromModel(diagramModel);
+  const validation = validateAndRepairDrawioXml(xml);
+
+  if (!validation.valid) {
+    throw new Error(`Direct edit produced invalid XML: ${validation.errors.join(" ")}`);
+  }
+
+  const artifact = await persistArtifactForVersion({
+    sessionId: input.sessionId,
+    versionId: version.id,
+    artifactType: "diagram_xml",
+    fileName: "diagram-direct-edit.drawio",
+    mimeType: "application/xml",
+    data: Buffer.from(validation.xml, "utf8"),
+    metadata: {
+      pipelineName: "diagram-direct-edit",
+      operationCount: input.operations.length,
+      repairApplied: validation.repairApplied
+    }
+  });
+
+  await updateVersionStructuredState({
+    versionId: version.id,
+    diagramModel,
+    metadata: {
+      pipelineName: "diagram-direct-edit",
+      status: "completed",
+      artifactId: artifact.id,
+      operationCount: input.operations.length
+    }
+  });
+
+  return {
+    versionId: version.id,
+    diagramModel,
+    xml: validation.xml,
+    artifactId: artifact.id,
+    operations: input.operations
   };
 }

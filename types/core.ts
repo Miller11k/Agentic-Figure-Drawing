@@ -151,3 +151,52 @@ export interface EditingAnalysis {
   fallbackBehavior?: string;
   executionRoute: "diagram-xml" | "diagram-model" | "image-generation" | "image-edit";
 }
+
+export type DirectDiagramEditOperation =
+  | {
+      type: "rename-node";
+      nodeId: string;
+      label: string;
+    }
+  | {
+      type: "move-node";
+      nodeId: string;
+      x: number;
+      y: number;
+    }
+  | {
+      type: "add-node";
+      node: {
+        id?: string;
+        label: string;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        groupId?: string;
+        style?: Record<string, unknown>;
+      };
+    }
+  | {
+      type: "delete-node";
+      nodeId: string;
+    }
+  | {
+      type: "update-node-style";
+      nodeId: string;
+      style: Record<string, unknown>;
+    }
+  | {
+      type: "add-edge";
+      edge: {
+        id?: string;
+        sourceId: string;
+        targetId: string;
+        label?: string;
+        style?: Record<string, unknown>;
+      };
+    }
+  | {
+      type: "delete-edge";
+      edgeId: string;
+    };

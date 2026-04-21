@@ -1,4 +1,5 @@
 import { attachArtifact } from "@/lib/session";
+import { prisma } from "@/lib/db/prisma";
 import type { ArtifactType } from "@/types";
 import { artifactStorage } from "./local-artifact-storage";
 
@@ -33,4 +34,17 @@ export async function persistArtifactForVersion(input: PersistArtifactInput) {
     checksum: stored.checksum,
     metadata: input.metadata
   });
+}
+
+export async function getArtifactRecord(artifactId: string) {
+  return prisma.artifact.findUniqueOrThrow({
+    where: { id: artifactId }
+  });
+}
+
+export async function readArtifactBytes(artifactId: string) {
+  const artifact = await getArtifactRecord(artifactId);
+  const data = await artifactStorage.read(artifact.storagePath);
+
+  return { artifact, data };
 }

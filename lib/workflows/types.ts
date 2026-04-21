@@ -2,6 +2,7 @@ import type {
   DiagramModel,
   DiagramSpec,
   DiagramTargetAnalysis,
+  DirectDiagramEditOperation,
   EditingAnalysis,
   ParsedEditIntent
 } from "@/types";
@@ -24,6 +25,20 @@ export interface DiagramGenerationWorkflowResult {
   artifactId: string;
 }
 
+export interface DiagramImportWorkflowInput extends WorkflowContext {
+  xml: string;
+  fileName?: string;
+}
+
+export interface DiagramImportWorkflowResult {
+  versionId: string;
+  diagramModel: DiagramModel;
+  xml: string;
+  artifactId: string;
+  repairApplied: boolean;
+  notes: string[];
+}
+
 export interface DiagramEditingWorkflowInput extends WorkflowContext {
   prompt: string;
   existingXml: string;
@@ -38,6 +53,19 @@ export interface DiagramEditingWorkflowResult {
   xml: string;
   repairApplied: boolean;
   artifactId: string;
+}
+
+export interface DiagramDirectEditWorkflowInput extends WorkflowContext {
+  diagramModel: DiagramModel;
+  operations: DirectDiagramEditOperation[];
+}
+
+export interface DiagramDirectEditWorkflowResult {
+  versionId: string;
+  diagramModel: DiagramModel;
+  xml: string;
+  artifactId: string;
+  operations: DirectDiagramEditOperation[];
 }
 
 export interface ImageGenerationWorkflowInput extends WorkflowContext {

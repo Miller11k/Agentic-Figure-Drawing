@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { handleRouteError } from "@/lib/api/responses";
 import { revertSessionToVersion } from "@/lib/session";
 import { revertSessionRequestSchema } from "@/lib/validation/schemas";
 
@@ -9,16 +10,16 @@ interface RouteContext {
 }
 
 export async function POST(request: Request, context: RouteContext) {
-  const body = await request.json().catch(() => ({}));
-  const parsed = revertSessionRequestSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  try {
+    const body = await request.json().catch(() => ({}));
+    const parsed = revertSessionRequestSchema.parse(body);
+    const version = await revertSessionToVersion(context.params.sessionId, parsed.versionId);
+    return NextResponse.json({
+      sessionId: context.params.sessionId,
+      currentVersionId: version.id,
+      revertedToVersionId: parsed.versionId
+    });
+  } catch (error) {
+    return handleRouteError(error);
   }
-
-  const version = await revertSessionToVersion(context.params.sessionId, parsed.data.versionId);
-  return NextResponse.json({
-    sessionId: context.params.sessionId,
-    currentVersionId: version.id
-  });
 }

@@ -72,10 +72,21 @@ The app runs at `http://localhost:3000` by default.
 
 ## Phase 1 API Routes
 
+## API Routes
+
 - `GET /api/health` - basic service health check
 - `POST /api/session/create` - create a session and initial version
 - `GET /api/session/:sessionId` - retrieve session history, artifacts, and traces
-- `POST /api/session/:sessionId/revert` - move the active session pointer to an earlier version
+- `POST /api/session/:sessionId/revert` - create a non-destructive revert version pointing at an earlier version's metadata
+- `POST /api/diagram/import` - parse Draw.io XML, persist source XML, and store a normalized `DiagramModel`
+- `POST /api/diagram/generate` - run the diagram generation workflow
+- `POST /api/diagram/edit` - run prompt-guided diagram editing
+- `POST /api/diagram/direct-edit` - apply deterministic direct edit operations to a `DiagramModel`
+- `POST /api/image/generate` - run OpenAI-backed image generation
+- `POST /api/image/edit` - run OpenAI-backed image editing with optional base64 mask
+- `POST /api/upload` - persist a generic uploaded artifact using JSON/base64 or multipart form data
+- `GET /api/artifact/:artifactId` - retrieve artifact metadata
+- `GET /api/download/:artifactId` - download artifact bytes
 - `GET /api/traces/:sessionId` - list OpenAI pipeline traces for a session
 
 ## Persistence Model
@@ -125,13 +136,14 @@ Each OpenAI-backed stage is intended to write a trace record with session id, ve
 
 ## Phase 4 Direction
 
-Phase 4 should build on this foundation by implementing the first user-facing workflow slices:
+Phase 5 should build on this foundation by implementing the first user-facing workflow slices:
 
-- API routes for diagram generation/editing and image generation/editing
-- diagram XML upload/import persistence
-- deterministic diagram model edit operations where possible
-- minimal frontend session creation and history display
-- download/export routes for stored artifacts
+- a browser UI for session creation and session history
+- diagram XML upload/import controls
+- prompt controls wired to diagram and image generation/editing routes
+- a basic diagram preview using the normalized `DiagramModel`
+- artifact download buttons
+- trace/debug panel rendering `/api/traces/:sessionId`
 
 Keep all model-backed behavior inside `lib/openai` workflows and persist every meaningful output through the session/version infrastructure.
 

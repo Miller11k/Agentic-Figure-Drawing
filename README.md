@@ -2,7 +2,7 @@
 
 This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
 
-Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 adds the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation.
+Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 added the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation. Phase 4 connected the backend API layer. Phase 5 adds the main three-panel frontend shell.
 
 ## Tech Stack
 
@@ -170,3 +170,20 @@ Compatibility limits:
 - Advanced shapes, nested geometry points, edge waypoints, pages, custom libraries, and style semantics are preserved only as raw style/metadata where practical.
 - Group detection is heuristic and focused on swimlanes, containers, and parent-child relationships.
 - The serializer emits clean prototype-friendly XML rather than byte-for-byte preserving the original file.
+
+## Frontend Shell
+
+The home page now renders a stateful editing shell with:
+
+- left control panel for session creation, mode toggle, prompt entry, diagram XML import, image upload/edit, and artifact download
+- center workspace that previews normalized `DiagramModel` content as SVG or displays the active image artifact
+- right inspector panel with session history, revert actions, active artifact metadata, parsed intent, execution summary, and trace/debug entries
+
+Frontend state is split across:
+
+- `features/session/api.ts` for typed route integration
+- `features/session/store.ts` for active editor state with Zustand
+- `components/providers.tsx` for TanStack Query
+- `components/EditorShell.tsx` for layout composition
+
+Advanced diagram direct manipulation and mask drawing are intentionally left for later phases.

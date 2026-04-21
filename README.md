@@ -2,7 +2,7 @@
 
 This project is a browser-based prototype for stateful diagram and image editing. It is designed around versioned sessions, persistent artifacts, structured diagram models, and explicit OpenAI-backed reasoning/generation/editing workflows.
 
-Phase 1 established the persistence and project foundation. Phase 2 adds the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows.
+Phase 1 established the persistence and project foundation. Phase 2 added the OpenAI service layer, trace-wrapped stage execution, and orchestration skeletons for the multi-stage workflows. Phase 3 adds the structured Draw.io XML pipeline for import, normalization, deterministic model-to-XML output, and repair-ready validation.
 
 ## Tech Stack
 
@@ -119,18 +119,42 @@ Each OpenAI-backed stage is intended to write a trace record with session id, ve
 ## Current Limitations
 
 - OpenAI wrappers are implemented, but most workflows still need real UI/API route entry points.
-- Diagram XML parsing is limited to a lightweight shape validator and empty model factory.
+- Diagram XML support targets a practical uncompressed Draw.io subset, not every diagrams.net feature.
 - The frontend is a scaffold page, not the final editor UI.
 - Direct diagram editing, image editing, mask drawing, and download/export flows are reserved for later phases.
 
-## Phase 3 Direction
+## Phase 4 Direction
 
-Phase 3 should build on this foundation by implementing the first user-facing workflow slices:
+Phase 4 should build on this foundation by implementing the first user-facing workflow slices:
 
-- diagram XML import into `DiagramModel`
 - API routes for diagram generation/editing and image generation/editing
-- deterministic diagram model updates where possible
-- Draw.io XML validation/repair
+- diagram XML upload/import persistence
+- deterministic diagram model edit operations where possible
 - minimal frontend session creation and history display
+- download/export routes for stored artifacts
 
 Keep all model-backed behavior inside `lib/openai` workflows and persist every meaningful output through the session/version infrastructure.
+
+## Structured Diagram XML Pipeline
+
+Draw.io XML is treated as a first-class artifact. The current deterministic pipeline is:
+
+1. Import `.drawio` / diagrams.net XML.
+2. Parse common `mxCell` records from `<mxGraphModel><root>`.
+3. Normalize vertices into `DiagramModel.nodes`.
+4. Normalize edges into `DiagramModel.edges`.
+5. Detect practical groups from swimlane/container-like vertex cells or parent-child structure.
+6. Preserve ids, labels, raw style strings, parent/group links, connector endpoints, and geometry where available.
+7. Convert `DiagramSpec` into `DiagramModel` with deterministic stable ids and grid placement.
+8. Serialize `DiagramModel` back to Draw.io-compatible XML.
+9. Validate root/layer cells and connector references, with lightweight repair for missing root/layer cells.
+
+The sample diagram at `public/samples/basic.drawio` is used by the round-trip tests.
+
+Compatibility limits:
+
+- The parser targets uncompressed Draw.io XML containing `mxGraphModel` and `mxCell` elements.
+- Compressed diagrams.net payloads are not decoded yet.
+- Advanced shapes, nested geometry points, edge waypoints, pages, custom libraries, and style semantics are preserved only as raw style/metadata where practical.
+- Group detection is heuristic and focused on swimlanes, containers, and parent-child relationships.
+- The serializer emits clean prototype-friendly XML rather than byte-for-byte preserving the original file.

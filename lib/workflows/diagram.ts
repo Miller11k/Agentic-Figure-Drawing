@@ -3,6 +3,7 @@ import { getOpenAIModelConfig, openAIWorkflowService } from "@/lib/openai";
 import { createVersionStep, updateVersionStructuredState } from "@/lib/session";
 import { persistArtifactForVersion } from "@/lib/storage";
 import { runTracedStage, summarizeForTrace } from "@/lib/trace";
+import { createDrawioXmlFromModel, validateAndRepairDrawioXml } from "@/lib/xml";
 import type {
   DiagramEditingWorkflowInput,
   DiagramEditingWorkflowResult,
@@ -51,11 +52,10 @@ export async function runDiagramGenerationPipeline(
   const { result: generatedXml } = await runTracedStage(
     {
       ...traceBase,
-      stageName: "generate-diagram-xml",
-      inputSummary: summarizeForTrace(diagramSpec),
-      modelUsed: models.textModel
+      stageName: "diagram-model-to-xml",
+      inputSummary: summarizeForTrace(diagramModel)
     },
-    () => openAIWorkflowService.generateDiagramXmlFromSpec(diagramSpec),
+    async () => createDrawioXmlFromModel(diagramModel),
     (xml) => summarizeForTrace({ xmlLength: xml.length })
   );
 
@@ -63,10 +63,9 @@ export async function runDiagramGenerationPipeline(
     {
       ...traceBase,
       stageName: "validate-and-repair-xml",
-      inputSummary: summarizeForTrace({ xmlLength: generatedXml.length }),
-      modelUsed: models.textModel
+      inputSummary: summarizeForTrace({ xmlLength: generatedXml.length })
     },
-    () => openAIWorkflowService.validateAndRepairDiagramXml(generatedXml)
+    async () => validateAndRepairDrawioXml(generatedXml)
   );
 
   const artifact = await persistArtifactForVersion({
@@ -169,10 +168,17 @@ export async function runDiagramEditingPipeline(
     {
       ...traceBase,
       stageName: "validate-and-repair-xml",
-      inputSummary: summarizeForTrace({ xmlLength: transformedXml.length }),
-      modelUsed: models.textModel
+      inputSummary: summarizeForTrace({ xmlLength: transformedXml.length })
     },
-    () => openAIWorkflowService.validateAndRepairDiagramXml(transformedXml)
+    async () => {
+      const deterministic = validateAndRepairDrawioXml(transformedXml);
+
+      if (deterministic.valid) {
+        return deterministic;
+      }
+
+      return openAIWorkflowService.validateAndRepairDiagramXml(transformedXml);
+    }
   );
 
   const artifact = await persistArtifactForVersion({

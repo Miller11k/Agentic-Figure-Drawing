@@ -871,31 +871,71 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
               edge.style.dashed === "1" ||
               (typeof edge.style.raw === "string" && edge.style.raw.includes("dashed=1"));
             const strokeWidth = typeof edge.style.strokeWidth === "number" ? edge.style.strokeWidth : selected ? 4 : 2;
-            const labelWidth = edge.label ? Math.max(56, Math.min(220, edge.label.length * 7 + 20)) : 0;
+            const labelWidth = Math.max(96, Math.min(240, (edge.label?.length ?? 10) * 7 + 28));
             const isEditing = editingLabel?.type === "edge" && editingLabel.id === edge.id;
+            const showLabelEditor = selected || isEditing;
+            const selectEdge = () => selectElement({ type: "edge", id: edge.id });
+            const editEdgeLabel = () => {
+              selectEdge();
+              setEditingLabel({ type: "edge", id: edge.id });
+            };
+            const commitEdgeLabel = (value: string) => {
+              const nextLabel = value.trim();
+              const currentLabel = (edge.label ?? "").trim();
+              if (nextLabel === currentLabel) return;
+              commit({ type: "update-edge-label", edgeId: edge.id, label: nextLabel });
+            };
             return (
               <g
                 key={edge.id}
                 onPointerDown={(event) => {
                   event.stopPropagation();
-                  selectElement({ type: "edge", id: edge.id });
+                  selectEdge();
                 }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
-                  setEditingLabel({ type: "edge", id: edge.id });
+                  editEdgeLabel();
                 }}
               >
+                <path
+                  d={pointsToSvgPath(route.points)}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={Math.max(18, strokeWidth + 14)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="cursor-pointer"
+                  pointerEvents="stroke"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    selectEdge();
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    editEdgeLabel();
+                  }}
+                />
                 <path d={pointsToSvgPath(route.points)} fill="none" stroke={edgeStroke} strokeWidth={strokeWidth} strokeDasharray={dashed ? "8 6" : undefined} markerEnd="url(#arrow)" />
-                {isEditing ? (
-                  <foreignObject x={route.labelPoint.x - 90} y={route.labelPoint.y - 24} width="180" height="42">
+                {showLabelEditor ? (
+                  <foreignObject
+                    x={route.labelPoint.x - labelWidth / 2}
+                    y={route.labelPoint.y - 24}
+                    width={labelWidth}
+                    height="44"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                  >
                     <input
-                      autoFocus
-                      className="h-8 w-full rounded-xl border border-slate-300 bg-white px-2 text-center text-xs font-semibold text-slate-800 shadow-sm outline-none"
+                      autoFocus={isEditing}
+                      className="h-8 w-full rounded-xl border border-teal-200 bg-white px-2 text-center text-xs font-semibold text-slate-800 shadow-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                       defaultValue={edge.label ?? ""}
-                      placeholder="Edge label"
+                      placeholder="Type edge label"
                       onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onFocus={() => setEditingLabel({ type: "edge", id: edge.id })}
                       onBlur={(event) => {
-                        commit({ type: "update-edge-label", edgeId: edge.id, label: event.currentTarget.value });
+                        commitEdgeLabel(event.currentTarget.value);
                         setEditingLabel(null);
                       }}
                       onKeyDown={(event) => {
@@ -909,7 +949,17 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
                     />
                   </foreignObject>
                 ) : edge.label ? (
-                  <g>
+                  <g
+                    className="cursor-text"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      selectEdge();
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                      editEdgeLabel();
+                    }}
+                  >
                     <rect
                       x={route.labelPoint.x - labelWidth / 2}
                       y={route.labelPoint.y - 17}
@@ -922,6 +972,29 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
                     />
                     <text x={route.labelPoint.x} y={route.labelPoint.y - 2} fill="#475569" fontSize="12" fontWeight="600" textAnchor="middle">
                       {edge.label}
+                    </text>
+                  </g>
+                ) : selected ? (
+                  <g
+                    className="cursor-text"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      editEdgeLabel();
+                    }}
+                  >
+                    <rect
+                      x={route.labelPoint.x - 43}
+                      y={route.labelPoint.y - 17}
+                      width="86"
+                      height="24"
+                      rx="9"
+                      fill="#ffffff"
+                      stroke="#99f6e4"
+                      strokeDasharray="4 4"
+                      opacity="0.96"
+                    />
+                    <text x={route.labelPoint.x} y={route.labelPoint.y - 1} fill="#0f766e" fontSize="11" fontWeight="700" textAnchor="middle">
+                      Add label
                     </text>
                   </g>
                 ) : null}

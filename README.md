@@ -75,7 +75,7 @@ Mask tooling includes paint/erase modes, brush size, opacity, undo/redo, clear, 
 
 ### Revert and History
 
-`POST /api/session/:id/revert` creates a new `revert` version that points to cloned metadata records for the target version's artifacts. It does not mutate older history. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state.
+`POST /api/session/:id/revert` moves the session's current-version pointer back to the selected version without creating an extra timeline item. Older history remains immutable, and subsequent edits create new versions from the active state. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state.
 
 ## OpenAI Integration Points
 
@@ -185,7 +185,9 @@ Then open `http://localhost:3000`.
 
 ```bash
 npm run typecheck
+npm run lint
 npm test
+npm run validate
 npm run build
 npm run build:isolated
 npm run docker:build
@@ -231,7 +233,15 @@ The test suite covers:
 - frontend image edit request shaping
 - session history and revert metadata behavior
 
-Run `npm test` before presenting or extending the prototype.
+Quality gates:
+
+- `npm run lint` checks the Next.js/React code with `next/core-web-vitals`.
+- `npm run typecheck` runs strict TypeScript validation.
+- `npm test` runs the deterministic Vitest suite.
+- `npm run build:isolated` runs a production-style Next build into `.next-build/`, which is useful on Windows or while a dev server owns `.next/`.
+- `npm run validate` runs lint, typecheck, tests, and the isolated build as one presentation-ready check.
+
+The live OpenAI smoke test is intentionally opt-in and skipped by default so the normal suite does not require network access or spend API credits. Set `LIVE_OPENAI_SMOKE=1` when you specifically want to validate real OpenAI schema responses against the service normalizers.
 
 ## Report Artifacts
 
@@ -259,7 +269,7 @@ Benchmark-oriented fixtures live in `benchmarks/fixtures/`:
 - Gemini mask-guided editing uses the source image plus exported mask as multimodal guidance because Gemini does not use the same native alpha-mask inpainting parameter as OpenAI. It is supported, but OpenAI remains the stricter option for pixel-protected localized edits.
 - Diagram verification is intentionally conservative. It can improve label clarity, node type semantics, and obvious wording issues, but it does not reconstruct missing topology or replace an otherwise usable diagram with a brand-new one.
 - Sharp-backed verification snapshots require the optional rasterization step to succeed in the runtime environment; if rasterization fails, the workflow falls back to structured text verification.
-- Revert and undo/redo are version-history operations: they create new version steps that reference selected artifacts rather than physically duplicating stored files or maintaining a per-keystroke local command stack.
+- Revert and undo/redo move the current-version pointer through persisted history rather than creating extra timeline entries. This keeps history readable, but local per-keystroke command replay remains intentionally lightweight.
 - The mask editor supports aligned drawing, paint/erase, lasso fill, feathered mask export, opacity, undo/redo, clear, request shaping, and mask export. It does not yet include semantic segmentation or AI-assisted automatic region selection.
 - Authentication, multi-user authorization, hosted object storage, and production observability are outside the current prototype.
 

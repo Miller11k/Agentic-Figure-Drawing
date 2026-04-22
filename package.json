@@ -13,6 +13,7 @@
     "docker:dev": "docker compose --profile dev up dev",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "validate": "npm run lint && npm run typecheck && npm test && npm run build:isolated",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",

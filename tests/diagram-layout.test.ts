@@ -11,6 +11,36 @@ function overlaps(a: BoundingBox, b: BoundingBox, padding = 0) {
   );
 }
 
+function crossingCount(diagram: DiagramModel) {
+  const nodes = new Map(diagram.nodes.map((node) => [node.id, node.boundingBox!]));
+  let crossings = 0;
+
+  for (let i = 0; i < diagram.edges.length; i += 1) {
+    for (let j = i + 1; j < diagram.edges.length; j += 1) {
+      const first = diagram.edges[i];
+      const second = diagram.edges[j];
+      const firstSource = nodes.get(first.sourceId);
+      const firstTarget = nodes.get(first.targetId);
+      const secondSource = nodes.get(second.sourceId);
+      const secondTarget = nodes.get(second.targetId);
+      if (!firstSource || !firstTarget || !secondSource || !secondTarget) continue;
+
+      const firstSourceY = firstSource.y + firstSource.height / 2;
+      const firstTargetY = firstTarget.y + firstTarget.height / 2;
+      const secondSourceY = secondSource.y + secondSource.height / 2;
+      const secondTargetY = secondTarget.y + secondTarget.height / 2;
+      const sourceOrder = firstSourceY - secondSourceY;
+      const targetOrder = firstTargetY - secondTargetY;
+
+      if (sourceOrder * targetOrder < 0) {
+        crossings += 1;
+      }
+    }
+  }
+
+  return crossings;
+}
+
 const model: DiagramModel = {
   nodes: [
     { id: "api", stableId: "api", label: "API", boundingBox: { x: 400, y: 400, width: 150, height: 70 }, style: {}, data: {} },
@@ -147,5 +177,29 @@ describe("diagram layout helpers", () => {
 
     expect(regional.groups).toHaveLength(2);
     expect(overlaps(regional.groups[0].boundingBox!, regional.groups[1].boundingBox!, 24)).toBe(false);
+  });
+
+  it("reorders optimized layout columns to minimize crossed edge corridors", () => {
+    const tangled: DiagramModel = {
+      ...model,
+      nodes: [
+        { id: "source-a", stableId: "source-a", label: "A source", style: {}, data: {} },
+        { id: "source-b", stableId: "source-b", label: "B source", style: {}, data: {} },
+        { id: "target-c", stableId: "target-c", label: "C target", style: {}, data: {} },
+        { id: "target-d", stableId: "target-d", label: "D target", style: {}, data: {} }
+      ],
+      edges: [
+        { id: "a-d", stableId: "a-d", sourceId: "source-a", targetId: "target-d", label: "to D", style: {}, data: {} },
+        { id: "b-c", stableId: "b-c", sourceId: "source-b", targetId: "target-c", label: "to C", style: {}, data: {} }
+      ],
+      groups: []
+    };
+
+    const hierarchical = applyHierarchicalLayout(tangled);
+    const optimized = applyOptimizedLayout(tangled);
+
+    expect(crossingCount(hierarchical)).toBeGreaterThan(crossingCount(optimized));
+    expect(crossingCount(optimized)).toBe(0);
+    expect(optimized.layoutMetadata.edgeOverlapReduction).toBe("barycentric-column-ordering");
   });
 });

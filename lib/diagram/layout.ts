@@ -202,6 +202,71 @@ function edgeDegree(model: DiagramModel) {
   return degree;
 }
 
+function nodeCenterY(node: DiagramNodeModel) {
+  const box = boxFor(node);
+  return box.y + box.height / 2;
+}
+
+function median(values: number[]) {
+  if (values.length === 0) return undefined;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function assignColumnY(nodes: DiagramNodeModel[], yStart: number, rowGap: number) {
+  let y = yStart;
+  for (const node of nodes) {
+    const current = readableBoxFor(node);
+    node.boundingBox = {
+      ...current,
+      y: Math.round(y)
+    };
+    y += current.height + rowGap;
+  }
+}
+
+function reduceEdgeOverlaps(
+  model: DiagramModel,
+  sortedDepths: number[],
+  sortedColumns: Map<number, DiagramNodeModel[]>,
+  columnHeights: Map<number, number>,
+  maxColumnHeight: number,
+  rowGap: number
+) {
+  const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
+  const neighbors = new Map(model.nodes.map((node) => [node.id, [] as string[]]));
+
+  for (const edge of model.edges) {
+    if (!nodeById.has(edge.sourceId) || !nodeById.has(edge.targetId)) continue;
+    neighbors.get(edge.sourceId)?.push(edge.targetId);
+    neighbors.get(edge.targetId)?.push(edge.sourceId);
+  }
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    const directions = pass % 2 === 0 ? [sortedDepths, [...sortedDepths].reverse()] : [[...sortedDepths].reverse(), sortedDepths];
+
+    for (const depths of directions) {
+      for (const depth of depths) {
+        const nodes = sortedColumns.get(depth);
+        if (!nodes || nodes.length < 2) continue;
+
+        nodes.sort((a, b) => {
+          const aMedian = median((neighbors.get(a.id) ?? []).map((id) => nodeById.get(id)).filter((node): node is DiagramNodeModel => Boolean(node)).map(nodeCenterY));
+          const bMedian = median((neighbors.get(b.id) ?? []).map((id) => nodeById.get(id)).filter((node): node is DiagramNodeModel => Boolean(node)).map(nodeCenterY));
+          const aRank = aMedian ?? nodeCenterY(a);
+          const bRank = bMedian ?? nodeCenterY(b);
+
+          return aRank - bRank || nodeCenterY(a) - nodeCenterY(b) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
+        });
+
+        const yStart = START_Y + (maxColumnHeight - (columnHeights.get(depth) ?? 0)) / 2;
+        assignColumnY(nodes, yStart, rowGap);
+      }
+    }
+  }
+}
+
 export function applyGridLayout(diagramModel: DiagramModel): DiagramModel {
   const model = cloneModel(diagramModel);
   const columns = Math.max(1, Math.ceil(Math.sqrt(model.nodes.length)));
@@ -371,6 +436,7 @@ export function applyOptimizedLayout(diagramModel: DiagramModel): DiagramModel {
     }
   }
 
+  reduceEdgeOverlaps(model, sortedDepths, sortedColumns, columnHeights, maxColumnHeight, rowGap);
   normalizeLayoutOrigin(model);
   updateGroupBounds(model);
   resolveGroupOverlaps(model);
@@ -384,6 +450,8 @@ export function applyOptimizedLayout(diagramModel: DiagramModel): DiagramModel {
     columnGap,
     rowGap,
     overlapAvoidance: true,
+    edgeOverlapReduction: "barycentric-column-ordering",
+    edgeRouting: "orthogonal-minimized-overlap",
     labelReadability: "node-size-and-region-aware"
   };
 

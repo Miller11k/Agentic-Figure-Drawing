@@ -12,4 +12,3 @@ prisma/dev.db-journal
 public/artifacts/
 *.log
 .DS_Store
-openai_secret_key

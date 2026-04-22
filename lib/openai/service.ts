@@ -9,7 +9,10 @@ import type {
 import {
   diagramSpecSchema,
   diagramTargetAnalysisSchema,
+  diagramTypeInferenceSchema,
+  diagramVerificationResponseSchema,
   editingAnalysisSchema,
+  expandedDiagramPromptSchema,
   parsedEditIntentSchema,
   xmlStringResponseSchema,
   xmlValidationRepairResponseSchema
@@ -17,12 +20,17 @@ import {
 import {
   analyzeDiagramTargetsPrompt,
   diagramXmlFromSpecPrompt,
+  inferAndExpandDiagramPrompt as inferAndExpandDiagramPromptTemplate,
+  expandDiagramTypePrompt,
+  generateDiagramSpecFromImagePrompt,
   generateDiagramSpecPrompt,
+  inferDiagramTypePrompt,
   parseEditIntentPrompt,
   planDiagramEditsPrompt,
   summarizeArtifactChangesPrompt,
   transformDiagramXmlPrompt,
-  validateAndRepairDiagramXmlPrompt
+  validateAndRepairDiagramXmlPrompt,
+  verifyDiagramAgainstPromptPrompt
 } from "./prompts";
 import { defaultOpenAIClientAdapter } from "./client";
 import { parseStructuredJson } from "./json";
@@ -37,6 +45,9 @@ import {
 } from "./normalizers";
 import type {
   OpenAIClientAdapter,
+  DiagramTypeInference,
+  DiagramVerificationResult,
+  ExpandedDiagramPrompt,
   OpenAIImageResult,
   OpenAIStageContext,
   OpenAIWorkflowService,
@@ -133,6 +144,148 @@ export class OpenAIWorkflowServiceImpl implements OpenAIWorkflowService {
       diagramSpecSchema,
       (value) => normalizeDiagramSpec(value, prompt)
     );
+  }
+
+  async generateDiagramSpecFromImage(
+    image: Buffer,
+    prompt: string,
+    diagramType?: string,
+    mimeType = "image/png",
+    context?: OpenAIStageContext
+  ): Promise<DiagramSpec> {
+    const prompts = generateDiagramSpecFromImagePrompt(prompt, diagramType);
+    const result = await this.adapter.generateTextFromImage({
+      ...prompts,
+      image,
+      mimeType,
+      responseFormat: "json_object"
+    });
+
+    return parseStructuredJson(
+      requireStructuredText(result.text, "generateDiagramSpecFromImage"),
+      diagramSpecSchema,
+      (value) => normalizeDiagramSpec(value, prompt)
+    );
+  }
+
+  async verifyDiagramAgainstPrompt(
+    image: Buffer,
+    prompt: string,
+    diagramSpec: DiagramSpec,
+    diagramType?: string,
+    mimeType = "image/svg+xml",
+    context?: OpenAIStageContext
+  ): Promise<DiagramVerificationResult> {
+    const prompts = verifyDiagramAgainstPromptPrompt(prompt, diagramSpec, diagramType);
+    const result =
+      image.byteLength > 0
+        ? await this.adapter.generateTextFromImage({
+            ...prompts,
+            image,
+            mimeType,
+            responseFormat: "json_object"
+          })
+        : await this.adapter.generateText({
+            ...prompts,
+            responseFormat: "json_object"
+          });
+
+    const verification = parseStructuredJson(
+      requireStructuredText(result.text, "verifyDiagramAgainstPrompt"),
+      diagramVerificationResponseSchema,
+      (value) => value
+    );
+
+    return {
+      matchesIntent: verification.matchesIntent,
+      confidence: verification.confidence,
+      issues: verification.issues ?? [],
+      correctionSummary: verification.correctionSummary ?? "",
+      safeCorrections: {
+        nodeLabels: verification.safeCorrections?.nodeLabels ?? {},
+        edgeLabels: verification.safeCorrections?.edgeLabels ?? {},
+        groupLabels: verification.safeCorrections?.groupLabels ?? {},
+        nodeTypes: verification.safeCorrections?.nodeTypes ?? {},
+        nodeIcons: verification.safeCorrections?.nodeIcons ?? {},
+        notes: verification.safeCorrections?.notes ?? []
+      }
+    };
+  }
+
+  async inferDiagramType(prompt: string, context?: OpenAIStageContext): Promise<DiagramTypeInference> {
+    const prompts = inferDiagramTypePrompt(prompt);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    const inference = parseStructuredJson(
+      requireStructuredText(result.text, "inferDiagramType"),
+      diagramTypeInferenceSchema,
+      (value) => {
+        const record = value as Record<string, unknown>;
+        return {
+          diagramType: typeof record.diagramType === "string" && record.diagramType.trim()
+            ? record.diagramType.trim()
+            : "general editable diagram",
+          confidence: typeof record.confidence === "number" ? Math.min(1, Math.max(0, record.confidence)) : 0.5,
+          reasoningSummary: typeof record.reasoningSummary === "string" ? record.reasoningSummary : "",
+          expertFraming: typeof record.expertFraming === "string" ? record.expertFraming : ""
+        };
+      }
+    );
+
+    return {
+      diagramType: inference.diagramType,
+      confidence: inference.confidence,
+      reasoningSummary: inference.reasoningSummary ?? "",
+      expertFraming: inference.expertFraming ?? ""
+    };
+  }
+
+  async inferAndExpandDiagramPrompt(prompt: string, context?: OpenAIStageContext): Promise<ExpandedDiagramPrompt> {
+    const prompts = inferAndExpandDiagramPromptTemplate(prompt);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "json_object"
+    });
+
+    const expanded = parseStructuredJson(
+      requireStructuredText(result.text, "inferAndExpandDiagramPrompt"),
+      expandedDiagramPromptSchema,
+      (value) => {
+        const record = value as Record<string, unknown>;
+        return {
+          diagramType: typeof record.diagramType === "string" && record.diagramType.trim()
+            ? record.diagramType.trim()
+            : "general editable diagram",
+          confidence: typeof record.confidence === "number" ? Math.min(1, Math.max(0, record.confidence)) : 0.5,
+          reasoningSummary: typeof record.reasoningSummary === "string" ? record.reasoningSummary : "",
+          expertFraming: typeof record.expertFraming === "string" ? record.expertFraming : "",
+          expandedPrompt: typeof record.expandedPrompt === "string" && record.expandedPrompt.trim()
+            ? record.expandedPrompt.trim()
+            : prompt
+        };
+      }
+    );
+
+    return {
+      diagramType: expanded.diagramType,
+      confidence: expanded.confidence,
+      reasoningSummary: expanded.reasoningSummary ?? "",
+      expertFraming: expanded.expertFraming ?? "",
+      expandedPrompt: expanded.expandedPrompt
+    };
+  }
+
+  async expandDiagramPrompt(prompt: string, diagramType: string, context?: OpenAIStageContext): Promise<string> {
+    const prompts = expandDiagramTypePrompt(prompt, diagramType);
+    const result = await this.adapter.generateText({
+      ...prompts,
+      responseFormat: "text"
+    });
+
+    return requireStructuredText(result.text, "expandDiagramPrompt").trim();
   }
 
   async generateDiagramXmlFromSpec(diagramSpec: DiagramSpec, context?: OpenAIStageContext): Promise<string> {

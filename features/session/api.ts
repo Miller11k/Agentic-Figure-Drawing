@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import type { DiagramModel, DirectDiagramEditOperation, EditorMode } from "@/types";
 import { buildImageEditPayload } from "@/lib/image/mask";
+import type { ImageGenerationProvider } from "@/lib/google";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -62,10 +63,15 @@ export function importDiagram(sessionId: string, xml: string, fileName: string, 
   });
 }
 
-export function generateDiagram(sessionId: string, prompt: string, parentVersionId?: string | null) {
+export function generateDiagram(
+  sessionId: string,
+  prompt: string,
+  parentVersionId?: string | null,
+  imageProvider?: ImageGenerationProvider
+) {
   return requestJson<DiagramGenerateResult>("/api/diagram/generate", {
     method: "POST",
-    body: JSON.stringify({ sessionId, prompt, parentVersionId })
+    body: JSON.stringify({ sessionId, prompt, parentVersionId, imageProvider })
   });
 }
 
@@ -94,10 +100,15 @@ export function directEditDiagram(
   });
 }
 
-export function generateImage(sessionId: string, prompt: string, parentVersionId?: string | null) {
+export function generateImage(
+  sessionId: string,
+  prompt: string,
+  parentVersionId?: string | null,
+  imageProvider?: ImageGenerationProvider
+) {
   return requestJson<ImageWorkflowResult>("/api/image/generate", {
     method: "POST",
-    body: JSON.stringify({ sessionId, prompt, parentVersionId })
+    body: JSON.stringify({ sessionId, prompt, parentVersionId, imageProvider })
   });
 }
 
@@ -106,11 +117,12 @@ export function editImage(
   prompt: string,
   imageBase64: string,
   maskBase64?: string,
-  parentVersionId?: string | null
+  parentVersionId?: string | null,
+  imageProvider?: ImageGenerationProvider
 ) {
   return requestJson<ImageWorkflowResult>("/api/image/edit", {
     method: "POST",
-    body: JSON.stringify(buildImageEditPayload({ sessionId, prompt, imageBase64, maskBase64, parentVersionId }))
+    body: JSON.stringify(buildImageEditPayload({ sessionId, prompt, imageBase64, maskBase64, parentVersionId, imageProvider }))
   });
 }
 

@@ -1,20 +1,38 @@
+import { getGoogleImageModelConfig, googleImageClient, type ImageGenerationProvider } from "@/lib/google";
 import { getOpenAIModelConfig, openAIWorkflowService } from "@/lib/openai";
 import { createVersionStep, updateVersionStructuredState } from "@/lib/session";
 import { persistArtifactForVersion } from "@/lib/storage";
 import { runTracedStage, summarizeForTrace } from "@/lib/trace";
 import type { ImageEditingWorkflowInput, ImageGenerationWorkflowInput, ImageWorkflowResult } from "./types";
 
+function revisedPromptFor(result: { revisedPrompt?: string; text?: string }) {
+  return result.revisedPrompt ?? result.text;
+}
+
+function tokenUsageFor(result: unknown) {
+  return typeof result === "object" && result !== null && "tokenUsage" in result
+    ? (result as { tokenUsage?: unknown }).tokenUsage
+    : undefined;
+}
+
+function defaultImageProvider(): ImageGenerationProvider {
+  const configured = process.env.IMAGE_GENERATION_PROVIDER;
+  return configured === "gemini" ? "gemini" : "openai";
+}
+
 export async function runImageGenerationPipeline(
   input: ImageGenerationWorkflowInput
 ): Promise<ImageWorkflowResult> {
   const models = getOpenAIModelConfig();
+  const googleModels = getGoogleImageModelConfig();
+  const provider = input.imageProvider ?? defaultImageProvider();
   const version = await createVersionStep({
     sessionId: input.sessionId,
     parentVersionId: input.parentVersionId,
     stepType: "prompt",
     mode: "image",
     prompt: input.prompt,
-    metadata: { pipelineName: "image-generation", status: "started" }
+    metadata: { pipelineName: "image-generation", status: "started", provider }
   });
 
   const traceBase = {
@@ -38,10 +56,13 @@ export async function runImageGenerationPipeline(
       ...traceBase,
       stageName: "generate-image",
       inputSummary: summarizeForTrace({ prompt: input.prompt }),
-      modelUsed: models.imageModel
+      modelUsed: provider === "gemini" ? googleModels.imageModel : models.imageModel
     },
-    () => openAIWorkflowService.generateImageFromPrompt(input.prompt),
-    (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType })
+    () =>
+      provider === "gemini"
+        ? googleImageClient.generateImage(input.prompt)
+        : openAIWorkflowService.generateImageFromPrompt(input.prompt),
+    (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType, provider })
   );
 
   const artifact = await persistArtifactForVersion({
@@ -53,8 +74,10 @@ export async function runImageGenerationPipeline(
     data: imageResult.image,
     metadata: {
       pipelineName: "image-generation",
-      revisedPrompt: imageResult.revisedPrompt,
-      tokenUsage: imageResult.tokenUsage
+      provider,
+      modelUsed: imageResult.modelUsed,
+      revisedPrompt: revisedPromptFor(imageResult),
+      tokenUsage: tokenUsageFor(imageResult)
     }
   });
 
@@ -64,12 +87,16 @@ export async function runImageGenerationPipeline(
     imageMetadata: {
       mimeType: imageResult.mimeType,
       bytes: imageResult.image.byteLength,
-      revisedPrompt: imageResult.revisedPrompt
+      revisedPrompt: revisedPromptFor(imageResult),
+      provider,
+      modelUsed: imageResult.modelUsed
     },
     metadata: {
       pipelineName: "image-generation",
       status: "completed",
-      artifactId: artifact.id
+      artifactId: artifact.id,
+      provider,
+      modelUsed: imageResult.modelUsed
     },
     previewArtifactId: artifact.id
   });
@@ -80,12 +107,15 @@ export async function runImageGenerationPipeline(
     artifactId: artifact.id,
     mimeType: imageResult.mimeType,
     bytes: imageResult.image.byteLength,
-    revisedPrompt: imageResult.revisedPrompt
+    revisedPrompt: revisedPromptFor(imageResult),
+    provider
   };
 }
 
 export async function runImageEditingPipeline(input: ImageEditingWorkflowInput): Promise<ImageWorkflowResult> {
   const models = getOpenAIModelConfig();
+  const googleModels = getGoogleImageModelConfig();
+  const provider = input.imageProvider ?? defaultImageProvider();
   const version = await createVersionStep({
     sessionId: input.sessionId,
     parentVersionId: input.parentVersionId,
@@ -95,7 +125,8 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
     metadata: {
       pipelineName: "image-editing",
       status: "started",
-      hasMask: Boolean(input.mask)
+      hasMask: Boolean(input.mask),
+      provider
     }
   });
 
@@ -152,10 +183,13 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
         imageBytes: input.image.byteLength,
         maskBytes: input.mask?.byteLength ?? 0
       }),
-      modelUsed: models.imageModel
+      modelUsed: provider === "gemini" ? googleModels.imageModel : models.imageModel
     },
-    () => openAIWorkflowService.editImageWithPrompt(input.image, input.prompt, input.mask),
-    (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType })
+    () =>
+      provider === "gemini"
+        ? googleImageClient.editImage({ image: input.image, prompt: input.prompt, mask: input.mask })
+        : openAIWorkflowService.editImageWithPrompt(input.image, input.prompt, input.mask),
+    (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType, provider })
   );
 
   const artifact = await persistArtifactForVersion({
@@ -167,8 +201,10 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
     data: imageResult.image,
     metadata: {
       pipelineName: "image-editing",
-      revisedPrompt: imageResult.revisedPrompt,
-      tokenUsage: imageResult.tokenUsage,
+      provider,
+      modelUsed: imageResult.modelUsed,
+      revisedPrompt: revisedPromptFor(imageResult),
+      tokenUsage: tokenUsageFor(imageResult),
       hasMask: Boolean(input.mask)
     }
   });
@@ -179,8 +215,10 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
     imageMetadata: {
       mimeType: imageResult.mimeType,
       bytes: imageResult.image.byteLength,
-      revisedPrompt: imageResult.revisedPrompt,
+      revisedPrompt: revisedPromptFor(imageResult),
       hasMask: Boolean(input.mask),
+      provider,
+      modelUsed: imageResult.modelUsed,
       sourceArtifactId: sourceArtifact.id,
       maskArtifactId: maskArtifact?.id
     },
@@ -189,7 +227,9 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
       status: "completed",
       artifactId: artifact.id,
       sourceArtifactId: sourceArtifact.id,
-      maskArtifactId: maskArtifact?.id
+      maskArtifactId: maskArtifact?.id,
+      provider,
+      modelUsed: imageResult.modelUsed
     },
     previewArtifactId: artifact.id
   });
@@ -202,6 +242,7 @@ export async function runImageEditingPipeline(input: ImageEditingWorkflowInput):
     maskArtifactId: maskArtifact?.id,
     mimeType: imageResult.mimeType,
     bytes: imageResult.image.byteLength,
-    revisedPrompt: imageResult.revisedPrompt
+    revisedPrompt: revisedPromptFor(imageResult),
+    provider
   };
 }

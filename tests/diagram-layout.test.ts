@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { applyDiagramLayout, applyHierarchicalLayout, pointsToSvgPath, routeOrthogonalEdge } from "../lib/diagram/layout";
-import type { DiagramModel } from "../types";
+import { applyDiagramLayout, applyHierarchicalLayout, applyOptimizedLayout, pointsToSvgPath, routeOrthogonalEdge } from "../lib/diagram/layout";
+import type { BoundingBox, DiagramModel } from "../types";
+
+function overlaps(a: BoundingBox, b: BoundingBox, padding = 0) {
+  return !(
+    a.x + a.width + padding <= b.x ||
+    b.x + b.width + padding <= a.x ||
+    a.y + a.height + padding <= b.y ||
+    b.y + b.height + padding <= a.y
+  );
+}
 
 const model: DiagramModel = {
   nodes: [
@@ -52,11 +61,91 @@ describe("diagram layout helpers", () => {
     expect(radial.nodes.every((node) => node.boundingBox)).toBe(true);
   });
 
+  it("uses optimized layout as the structural default with readable spacing", () => {
+    const optimized = applyOptimizedLayout(model);
+    const web = optimized.nodes.find((node) => node.id === "web")!;
+    const api = optimized.nodes.find((node) => node.id === "api")!;
+    const db = optimized.nodes.find((node) => node.id === "db")!;
+
+    expect(optimized.layoutMetadata.layout).toBe("deterministic-optimized");
+    expect(web.boundingBox!.x).toBeLessThan(api.boundingBox!.x);
+    expect(api.boundingBox!.x).toBeLessThan(db.boundingBox!.x);
+    expect(optimized.groups[0].boundingBox?.height).toBeGreaterThan(100);
+  });
+
+  it("selects an optimized radial fallback for dense graphs", () => {
+    const dense = applyDiagramLayout(
+      {
+        ...model,
+        edges: [
+          ...model.edges,
+          { id: "e1", stableId: "e1", sourceId: "web", targetId: "db", style: {}, data: {} },
+          { id: "e2", stableId: "e2", sourceId: "db", targetId: "web", style: {}, data: {} },
+          { id: "e3", stableId: "e3", sourceId: "db", targetId: "api", style: {}, data: {} }
+        ]
+      },
+      "optimized"
+    );
+
+    expect(dense.layoutMetadata.layout).toBe("deterministic-optimized-radial");
+  });
+
   it("routes self-like edges without returning a zero-length path", () => {
     const box = { x: 80, y: 80, width: 150, height: 70 };
     const route = routeOrthogonalEdge(box, box);
 
     expect(route.points).toHaveLength(4);
     expect(new Set(route.points.map((point) => `${point.x},${point.y}`)).size).toBeGreaterThan(2);
+  });
+
+  it("sizes and spaces optimized layouts so long labels do not collide", () => {
+    const readable = applyOptimizedLayout({
+      ...model,
+      nodes: [
+        { id: "start", stableId: "start", label: "Start request intake from mobile application", type: "start", style: {}, data: {} },
+        { id: "decision", stableId: "decision", label: "Is account verified and policy accepted?", type: "decision", style: {}, data: {} },
+        { id: "store", stableId: "store", label: "Customer profile and audit event data store", type: "data-store", style: {}, data: {} },
+        { id: "output", stableId: "output", label: "Return eligibility response and next best action", type: "output", style: {}, data: {} }
+      ],
+      edges: [
+        { id: "e1", stableId: "e1", sourceId: "start", targetId: "decision", label: "submit", style: {}, data: {} },
+        { id: "e2", stableId: "e2", sourceId: "decision", targetId: "store", label: "verified", style: {}, data: {} },
+        { id: "e3", stableId: "e3", sourceId: "store", targetId: "output", label: "profile state", style: {}, data: {} }
+      ],
+      groups: []
+    });
+
+    const boxes = readable.nodes.map((node) => node.boundingBox!);
+    for (let i = 0; i < boxes.length; i += 1) {
+      expect(boxes[i].width).toBeGreaterThanOrEqual(150);
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        expect(overlaps(boxes[i], boxes[j], 36)).toBe(false);
+      }
+    }
+
+    expect(readable.layoutMetadata.overlapAvoidance).toBe(true);
+  });
+
+  it("keeps sibling region bounds separated in optimized layouts", () => {
+    const regional = applyOptimizedLayout({
+      ...model,
+      nodes: [
+        { id: "a1", stableId: "a1", label: "Frontend input", style: {}, data: {}, groupId: "g1" },
+        { id: "a2", stableId: "a2", label: "Frontend output", style: {}, data: {}, groupId: "g1" },
+        { id: "b1", stableId: "b1", label: "Backend decision", style: {}, data: {}, groupId: "g2" },
+        { id: "b2", stableId: "b2", label: "Backend data store", style: {}, data: {}, groupId: "g2" }
+      ],
+      edges: [
+        { id: "a1_b1", stableId: "a1_b1", sourceId: "a1", targetId: "b1", style: {}, data: {} },
+        { id: "a2_b2", stableId: "a2_b2", sourceId: "a2", targetId: "b2", style: {}, data: {} }
+      ],
+      groups: [
+        { id: "g1", stableId: "g1", label: "Experience Layer", nodeIds: ["a1", "a2"], style: {} },
+        { id: "g2", stableId: "g2", label: "Platform Layer", nodeIds: ["b1", "b2"], style: {} }
+      ]
+    });
+
+    expect(regional.groups).toHaveLength(2);
+    expect(overlaps(regional.groups[0].boundingBox!, regional.groups[1].boundingBox!, 24)).toBe(false);
   });
 });

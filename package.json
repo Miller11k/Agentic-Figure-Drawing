@@ -7,6 +7,10 @@
     "build": "next build",
     "build:isolated": "node scripts/build-isolated.mjs",
     "start": "next start",
+    "start:docker": "NEXT_DIST_DIR=.next-build next start -H 0.0.0.0 -p ${PORT:-3000}",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up app",
+    "docker:dev": "docker compose --profile dev up dev",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
@@ -23,6 +27,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "reactflow": "^11.11.4",
+    "sharp": "^0.34.5",
     "zod": "^3.23.8",
     "zustand": "^5.0.1"
   },

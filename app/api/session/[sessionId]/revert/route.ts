@@ -17,7 +17,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({
       sessionId: context.params.sessionId,
       currentVersionId: version.id,
-      revertedToVersionId: parsed.versionId
+      revertedToVersionId: version.id
     });
   } catch (error) {
     return handleRouteError(error);

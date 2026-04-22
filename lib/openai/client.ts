@@ -95,6 +95,44 @@ export class DefaultOpenAIClientAdapter implements OpenAIClientAdapter {
     };
   }
 
+  async generateTextFromImage(input: {
+    systemPrompt: string;
+    userPrompt: string;
+    image: Buffer;
+    mimeType: string;
+    model?: string;
+    responseFormat?: "json_object" | "text";
+  }): Promise<OpenAITextResult> {
+    const model = input.model ?? this.modelConfig.textModel;
+    const imageUrl = `data:${input.mimeType};base64,${input.image.toString("base64")}`;
+    const completion = await withRetry(() =>
+      this.clientFactory().chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: input.systemPrompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: input.userPrompt },
+              { type: "image_url", image_url: { url: imageUrl } }
+            ]
+          }
+        ],
+        response_format: input.responseFormat === "json_object" ? { type: "json_object" } : undefined
+      })
+    );
+
+    return {
+      text: completion.choices[0]?.message?.content ?? "",
+      modelUsed: completion.model,
+      tokenUsage: {
+        promptTokens: completion.usage?.prompt_tokens,
+        completionTokens: completion.usage?.completion_tokens,
+        totalTokens: completion.usage?.total_tokens
+      }
+    };
+  }
+
   async generateImage(input: {
     prompt: string;
     model?: string;
@@ -141,7 +179,13 @@ export class DefaultOpenAIClientAdapter implements OpenAIClientAdapter {
         model,
         image,
         mask,
-        prompt: input.prompt,
+        prompt: input.mask
+          ? [
+              input.prompt,
+              "Apply the edit only to transparent pixels in the provided mask.",
+              "All opaque-mask pixels are protected context and must remain unchanged."
+            ].join("\n")
+          : input.prompt,
         n: 1,
         size: "1024x1024"
       })

@@ -6,13 +6,13 @@ This document provides presentation-ready descriptions aligned with the implemen
 
 Recommended figure: a layered architecture diagram with five horizontal bands.
 
-Top band, "User Interface": show the three-panel Next.js application. The left panel contains upload, mode, prompt, action, and download controls. The center workspace contains either the interactive diagram editor or the image/mask editor. The right panel contains session history, selected artifact metadata, parsed intent, execution summary, direct-edit inspector controls, traces, and revert controls.
+Top band, "User Interface": show the Next.js editing application. The left panel contains mode-specific upload/import, prompt, generation/edit, and download controls. The center workspace contains either the interactive diagram editor or the image/mask editor. A user-facing history toggle exposes timeline and revert controls without making observability or artifact internals part of the primary editing surface.
 
 Second band, "API Layer": show thin typed Next.js route handlers for session, diagram, image, upload, artifact, download, and trace endpoints. Label the API layer as validation and delegation only.
 
-Third band, "Workflow Services": show diagram generation, diagram editing, direct diagram editing, image generation, and image editing pipelines. Each pipeline should be drawn as staged blocks rather than a single monolithic call.
+Third band, "Workflow Services": show diagram generation, diagram editing, direct diagram editing, image generation, and image editing pipelines. Each pipeline should be drawn as staged blocks rather than a single monolithic call. For diagram generation, show prompt type inference, prompt expansion, optional Gemini visual draft generation, OpenAI visual extraction, deterministic model/XML conversion, XML repair, optional Sharp raster snapshot, and conservative OpenAI verification.
 
-Fourth band, "Core Services": show OpenAI service wrappers, Draw.io XML utilities, direct-edit reducers, artifact storage, session/version service, trace service, and Zod validation.
+Fourth band, "Core Services": show OpenAI service wrappers, optional Gemini image service, Draw.io XML utilities, Mermaid import, direct-edit reducers, artifact storage, session/version service, trace service, Sharp SVG-to-PNG rasterization, and Zod validation.
 
 Bottom band, "Persistence": show Prisma/SQLite tables for sessions, versions, artifacts, traces, and prompt/edit metadata plus local filesystem artifact storage.
 
@@ -33,7 +33,7 @@ Recommended figure: a workflow swimlane for one prompt-guided diagram edit.
 9. The updated XML is parsed back into a `DiagramModel`.
 10. Artifact records are written for XML/model outputs.
 11. A new version step is created and prompt/edit metadata is persisted.
-12. Trace records are returned to the frontend for inspection.
+12. Trace records are persisted for report/debug inspection and can be surfaced through the trace API.
 
 The main point of the figure is that the system keeps XML, structured models, artifacts, versions, and traces synchronized after every operation.
 
@@ -59,7 +59,7 @@ Column 3, "Checks": type checking, unit tests, integration tests, build validati
 
 Column 4, "Outcomes": valid Draw.io XML, preserved diagram ids where practical, synchronized session versions, downloadable artifacts, visible traces, and clear error states.
 
-Suggested local fixtures: use `public/samples/demo-architecture.drawio` for XML import and direct diagram edits, `public/samples/demo-source-image.svg` for image workspace screenshots, `public/samples/evaluation-fixtures.json` as the repeatable prompt/checklist source, and `benchmarks/fixtures/benchmark-suite.json` for benchmark categories covering XML compatibility, edit quality, latency, and recoverability.
+Suggested local fixtures: use `public/samples/demo-architecture.drawio` for XML import and direct diagram edits, `public/samples/demo-source-image.svg` for image workspace screenshots, `public/samples/evaluation-fixtures.json` as the repeatable prompt/checklist source, and `benchmarks/fixtures/benchmark-suite.json` for benchmark categories covering XML compatibility, edit quality, latency, verification, and recoverability.
 
 ## Evaluation Plan
 
@@ -69,6 +69,7 @@ Functional correctness:
 
 - Import representative Draw.io XML files and confirm that nodes, edges, labels, geometry, styles, and ids are preserved reasonably through import/export.
 - Generate diagrams from prompts and confirm that outputs create valid XML/model artifacts and a session version.
+- For diagram generation, confirm the staged flow: OpenAI prompt type inference and expansion, optional Gemini visual draft, OpenAI visual extraction to `DiagramSpec`, deterministic model/XML conversion, XML repair, optional Sharp raster verification snapshot, and conservative semantic corrections.
 - Apply prompt-guided diagram edits and confirm that a new version, artifacts, prompt metadata, and traces are produced.
 - Apply direct canvas edits for node labels, positions, styles, additions, removals, and edges; verify stable ids and valid serialized XML.
 - Generate and edit images; verify artifact persistence, download, and session history entries.
@@ -82,9 +83,9 @@ Reliability and recoverability:
 
 Usability:
 
-- Verify that the left panel always exposes the active action controls.
+- Verify that the left panel exposes the active mode's controls without report-only internals.
 - Verify that the center workspace reflects the active artifact and mode.
-- Verify that the right panel exposes current version state, selected element data, prompt metadata, trace summaries, and revert actions.
+- Verify that the optional history panel exposes user-meaningful previous states and revert actions.
 
 Performance and presentation readiness:
 
@@ -96,13 +97,15 @@ Performance and presentation readiness:
 
 ## Known Limitations and Future Work
 
-Draw.io compatibility is practical but not exhaustive. The XML parser and serializer focus on common `mxCell` structures, including nodes, edges, groups, labels, styles, and geometry. Complex diagrams.net features such as custom libraries, plugins, advanced containers, and unusual embedded metadata may require additional compatibility work.
+Draw.io compatibility is practical but not exhaustive. The XML parser and serializer focus on common `mxCell` structures, including nodes, edges, groups, labels, styles, geometry, and many raw attributes needed for reasonable round-trip preservation. Complex diagrams.net features such as custom libraries, plugins, advanced containers, unusual embedded metadata, and plugin-defined shape registries may require additional compatibility work.
 
-The diagram editor is intentionally a prototype editing surface. It supports meaningful direct edits, deterministic layout modes, connector routing, inspector style palettes, and group controls, but it does not yet match the full interaction depth of diagrams.net. Future work should add multi-select, alignment tools, keyboard shortcuts, and more advanced edge routing constraints.
+The diagram editor is intentionally a prototype editing surface. It supports meaningful direct edits, optimized and deterministic layout modes, connector routing, edge label editing, style controls, group controls, manual zoom, scrollable navigation, explicit fit-to-view, direct XML export, and version-history undo/redo. It does not yet match the full interaction depth of diagrams.net. Future work should add multi-select alignment, distribute tools, snap guides, full keyboard shortcut parity, reusable shape libraries, and more advanced edge routing constraints.
 
-Image masking is usable for localized edits, with aligned drawing, paint/erase modes, brush size control, opacity, undo/redo, clear, normalized request shaping, and mask exports. Future work should add feathering, lasso selection, zoom/pan, and semantic selection.
+Image masking is usable for localized edits, with aligned drawing, paint/erase modes, brush size control, opacity, undo/redo, clear, lasso fill, feathered mask export, normalized request shaping, and mask exports. Future work should add semantic selection, object-aware previews, and stronger provider-specific protection checks for non-masked image regions.
 
-The OpenAI service layer is modular and trace-aware, but production deployments should add rate limiting, retry policies tuned by operation type, cost telemetry, provider-side error classification, and model capability checks at startup.
+Diagram verification is implemented as a conservative review-and-correct stage rather than a full regeneration stage. The verifier can improve labels, semantic node types, and obvious wording issues, but it intentionally preserves existing ids, topology, layout, and edge structure to avoid damaging otherwise good diagrams. Sharp is used to rasterize rendered SVG snapshots into PNG for OpenAI vision verification when the runtime supports it; otherwise the verification stage falls back to structured text context.
+
+The OpenAI service layer is modular and trace-aware, and Gemini is isolated to image-generation and image-editing responsibilities. Production deployments should add rate limiting, retry policies tuned by operation type, cost telemetry, provider-side error classification, model capability checks at startup, cancellation, and progress streaming for long-running multi-model workflows.
 
 Persistence currently uses Prisma with SQLite and local filesystem artifacts by default. A production system should add hosted object storage, authentication, multi-user authorization, background job processing for long-running generations, and centralized observability.
 

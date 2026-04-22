@@ -7,6 +7,7 @@ import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { useEditorStore } from "./store";
 import type { SessionHistoryResponse } from "./types";
 import type { DirectDiagramEditOperation } from "@/types";
+import { Button, FieldLabel, Panel, Section, SectionTitle } from "@/components/ui";
 
 const STYLE_SWATCHES = [
   { label: "Blue", fill: "#eff6ff", stroke: "#2563eb" },
@@ -18,7 +19,7 @@ const STYLE_SWATCHES = [
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-48 overflow-auto border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+    <pre className="max-h-48 overflow-auto rounded-3xl border border-slate-800/70 bg-slate-950/95 p-4 text-xs leading-5 text-slate-100 shadow-inner">
       {JSON.stringify(value ?? null, null, 2)}
     </pre>
   );
@@ -117,36 +118,36 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
     });
 
   return (
-    <aside className="flex h-full flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-white p-4">
-      <section>
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Session history</h2>
+    <Panel className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
+      <Section>
+        <SectionTitle eyebrow="Timeline" title="Session history" />
         <div className="mt-3">
           <SessionHistoryPanel history={history} />
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Active artifact</h2>
-        <div className="mt-3 border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-          <p>ID: {activeArtifact?.id ?? "none"}</p>
-          <p>Type: {activeArtifact?.type ?? "none"}</p>
+      <Section>
+        <SectionTitle eyebrow="Artifact" title="Active output" />
+        <div className="mt-3 space-y-2 rounded-3xl border border-slate-200/70 bg-slate-50/70 p-4 text-sm text-slate-600">
+          <p className="truncate">ID: <span className="font-mono text-xs text-slate-800">{activeArtifact?.id ?? "none"}</span></p>
+          <p>Type: <span className="font-medium text-slate-800">{activeArtifact?.type ?? "none"}</span></p>
           <p>MIME: {activeArtifact?.mimeType ?? "none"}</p>
           <p>Bytes: {activeArtifact?.bytes ?? "unknown"}</p>
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Selected element</h2>
+      <Section>
+        <SectionTitle eyebrow="Inspector" title="Selected element" />
         <div className="mt-3 space-y-3">
           <JsonBlock value={selectedElementData ?? selectedElement ?? null} />
           {selectedNode ? (
-            <div className="space-y-3 border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase text-slate-500">Node style</p>
+            <div className="space-y-3 rounded-3xl border border-slate-200/70 bg-white/70 p-4">
+              <FieldLabel>Node style</FieldLabel>
               <div className="flex flex-wrap gap-2">
                 {STYLE_SWATCHES.map((swatch) => (
                   <button
                     key={swatch.label}
-                    className="h-8 w-8 border border-slate-300"
+                    className="h-8 w-8 rounded-full border border-white shadow-sm ring-1 ring-slate-200 transition hover:scale-105"
                     style={{ background: swatch.fill }}
                     title={swatch.label}
                     onClick={() => applyNodeStyle(selectedNode.id, swatch.fill, swatch.stroke)}
@@ -154,10 +155,10 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
                   />
                 ))}
               </div>
-              <label className="block text-xs font-semibold uppercase text-slate-500">
+              <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Group
                 <select
-                  className="mt-1 h-9 w-full border border-slate-300 bg-white px-2 text-sm normal-case text-slate-800"
+                  className="mt-2 h-10 w-full rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm normal-case text-slate-800 outline-none"
                   value={selectedNode.groupId ?? ""}
                   onChange={(event) =>
                     commit({ type: "set-node-group", nodeId: selectedNode.id, groupId: event.target.value || undefined })
@@ -173,12 +174,12 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
               </label>
               <div className="flex gap-2">
                 <input
-                  className="h-9 min-w-0 flex-1 border border-slate-300 px-2 text-sm"
+                  className="h-10 min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm outline-none"
                   value={groupLabel}
                   onChange={(event) => setGroupLabel(event.target.value)}
                 />
-                <button
-                  className="h-9 border border-teal-700 bg-teal-700 px-3 text-sm font-medium text-white"
+                <Button
+                  variant="primary"
                   onClick={() =>
                     commit({
                       type: "add-group",
@@ -188,18 +189,18 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
                   type="button"
                 >
                   Group
-                </button>
+                </Button>
               </div>
             </div>
           ) : null}
           {selectedEdge ? (
-            <div className="space-y-3 border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase text-slate-500">Edge style</p>
+            <div className="space-y-3 rounded-3xl border border-slate-200/70 bg-white/70 p-4">
+              <FieldLabel>Edge style</FieldLabel>
               <div className="flex flex-wrap gap-2">
                 {STYLE_SWATCHES.map((swatch) => (
                   <button
                     key={swatch.label}
-                    className="h-8 w-8 border border-slate-300"
+                    className="h-8 w-8 rounded-full border border-white shadow-sm ring-1 ring-slate-200 transition hover:scale-105"
                     style={{ background: swatch.stroke }}
                     title={swatch.label}
                     onClick={() => applyEdgeStyle(selectedEdge.id, swatch.stroke)}
@@ -210,27 +211,26 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
             </div>
           ) : null}
           {selectedGroup ? (
-            <div className="space-y-3 border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold uppercase text-slate-500">Group controls</p>
+            <div className="space-y-3 rounded-3xl border border-slate-200/70 bg-white/70 p-4">
+              <FieldLabel>Group controls</FieldLabel>
               <div className="flex gap-2">
                 <input
-                  className="h-9 min-w-0 flex-1 border border-slate-300 px-2 text-sm"
+                  className="h-10 min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 text-sm outline-none"
                   value={groupLabel}
                   onChange={(event) => setGroupLabel(event.target.value)}
                 />
-                <button
-                  className="h-9 border border-slate-300 bg-white px-3 text-sm font-medium"
+                <Button
                   onClick={() => commit({ type: "update-group", groupId: selectedGroup.id, label: groupLabel })}
                   type="button"
                 >
                   Rename
-                </button>
+                </Button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {STYLE_SWATCHES.map((swatch) => (
                   <button
                     key={swatch.label}
-                    className="h-8 w-8 border border-slate-300"
+                    className="h-8 w-8 rounded-full border border-white shadow-sm ring-1 ring-slate-200 transition hover:scale-105"
                     style={{ background: swatch.fill }}
                     title={swatch.label}
                     onClick={() => applyGroupStyle(selectedGroup.id, swatch.fill, swatch.stroke)}
@@ -238,8 +238,9 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
                   />
                 ))}
               </div>
-              <button
-                className="h-9 w-full border border-red-200 bg-white px-3 text-sm font-medium text-red-700"
+              <Button
+                variant="danger"
+                className="w-full"
                 onClick={() => {
                   commit({ type: "delete-group", groupId: selectedGroup.id, ungroupNodes: true });
                   selectElement(undefined);
@@ -247,23 +248,23 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
                 type="button"
               >
                 Ungroup and delete
-              </button>
+              </Button>
             </div>
           ) : null}
           {directEditMutation.isPending ? <p className="text-sm text-amber-700">Saving inspector edit...</p> : null}
           {directEditMutation.error ? <p className="text-sm text-red-700">{directEditMutation.error.message}</p> : null}
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Parsed intent</h2>
+      <Section>
+        <SectionTitle eyebrow="OpenAI" title="Parsed intent" />
         <div className="mt-3">
           <JsonBlock value={selectedStep?.parsedIntent} />
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Execution summary</h2>
+      <Section>
+        <SectionTitle eyebrow="Version" title="Execution summary" />
         <div className="mt-3">
           <JsonBlock
             value={{
@@ -274,17 +275,17 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
             }}
           />
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase text-slate-500">Trace debug</h2>
+      <Section>
+        <SectionTitle eyebrow="Observability" title="Trace debug" />
         <div className="mt-3 space-y-2">
           {traces.length === 0 ? <p className="text-sm text-slate-500">No traces recorded yet.</p> : null}
           {traces.slice().reverse().map((trace) => (
-            <div key={trace.id} className="border border-slate-200 bg-white p-3 text-xs text-slate-700">
+            <div key={trace.id} className="rounded-3xl border border-slate-200/70 bg-white/74 p-4 text-xs text-slate-700 shadow-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-slate-900">{trace.stageName}</span>
-                <span className={trace.status === "success" ? "text-teal-700" : "text-red-700"}>{trace.status}</span>
+                <span className={trace.status === "success" ? "text-emerald-600" : "text-red-600"}>{trace.status}</span>
               </div>
               <p className="mt-1 text-slate-500">{trace.pipelineName}</p>
               <p className="mt-1">Model: {trace.modelUsed ?? "local"}</p>
@@ -293,7 +294,7 @@ export function RightInspectorPanel({ history }: { history?: SessionHistoryRespo
             </div>
           ))}
         </div>
-      </section>
-    </aside>
+      </Section>
+    </Panel>
   );
 }

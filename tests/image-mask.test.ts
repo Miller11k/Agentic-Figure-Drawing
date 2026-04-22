@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildImageEditPayload,
   clampBrushSize,
+  clampFeatherRadius,
   clampMaskOpacity,
   describeMaskRequest,
   hasMaskPixels,
   maskExportFileName,
   maskCompositeOperation,
   maskStrokeStyle,
+  overlayAlphaToOpenAIMaskAlpha,
   normalizeCanvasPoint
 } from "../lib/image/mask";
 
@@ -51,18 +53,30 @@ describe("image mask helpers", () => {
       sessionId: "session_1",
       prompt: "edit",
       imageBase64: "data:image/png;base64,image",
-      maskBase64: "data:image/png;base64,mask"
+      maskBase64: "data:image/png;base64,mask",
+      imageProvider: "gemini"
     });
 
     expect(payload.maskBase64).toBe("data:image/png;base64,mask");
+    expect(payload.imageProvider).toBe("gemini");
   });
 
   it("normalizes brush settings for mask tooling", () => {
     expect(clampBrushSize(500)).toBe(120);
     expect(clampBrushSize(2)).toBe(8);
+    expect(clampFeatherRadius(200)).toBe(48);
+    expect(clampFeatherRadius(-1)).toBe(0);
     expect(clampMaskOpacity(2)).toBe(0.9);
     expect(maskCompositeOperation("erase")).toBe("destination-out");
     expect(maskStrokeStyle(0.333)).toBe("rgba(20, 184, 166, 0.33)");
+  });
+
+  it("maps painted overlay alpha to OpenAI mask transparency without expanding tiny feather values", () => {
+    expect(overlayAlphaToOpenAIMaskAlpha(0, 200, false)).toBe(255);
+    expect(overlayAlphaToOpenAIMaskAlpha(9, 200, false)).toBe(0);
+    expect(overlayAlphaToOpenAIMaskAlpha(1, 200, true)).toBe(255);
+    expect(overlayAlphaToOpenAIMaskAlpha(100, 200, true)).toBe(128);
+    expect(overlayAlphaToOpenAIMaskAlpha(200, 200, true)).toBe(0);
   });
 
   it("describes mask request geometry for traceable localized edits", () => {
@@ -71,6 +85,8 @@ describe("image mask helpers", () => {
       displaySize: { width: 500, height: 250 },
       brushSize: 42,
       mode: "paint",
+      tool: "lasso",
+      featherRadius: 12,
       maskBase64: "data:image/png;base64,mask"
     });
 
@@ -78,6 +94,8 @@ describe("image mask helpers", () => {
       scaleX: 2,
       scaleY: 2,
       brushSize: 42,
+      tool: "lasso",
+      featherRadius: 12,
       hasMask: true
     });
   });

@@ -1,13 +1,18 @@
-import { applyDirectDiagramEdits, createDiagramModelFromSpec } from "@/lib/diagram";
+import { applyDirectDiagramEdits, createDiagramModelFromSpec, isMermaidDiagram, parseMermaidToDiagramSpec } from "@/lib/diagram";
+import { getGoogleImageModelConfig, googleImageClient, type ImageGenerationProvider } from "@/lib/google";
 import { getOpenAIModelConfig, openAIWorkflowService } from "@/lib/openai";
 import { createVersionStep, updateVersionStructuredState } from "@/lib/session";
 import { persistArtifactForVersion } from "@/lib/storage";
 import { runTracedStage, summarizeForTrace } from "@/lib/trace";
+import { rasterizeSvgToPng } from "@/lib/diagram/rasterize";
+import { createDiagramSvgFromModel } from "@/lib/diagram/svg";
+import { supportedDiagramIconPromptCatalog } from "@/lib/diagram/icon-catalog";
 import {
   createDrawioXmlFromModel,
   parseDrawioXmlToDiagramModel,
   validateAndRepairDrawioXml
 } from "@/lib/xml";
+import type { DiagramModel, DiagramSpec } from "@/types";
 import type {
   DiagramDirectEditWorkflowInput,
   DiagramDirectEditWorkflowResult,
@@ -18,6 +23,115 @@ import type {
   DiagramImportWorkflowInput,
   DiagramImportWorkflowResult
 } from "./types";
+
+type SafeDiagramCorrections = {
+  nodeLabels: Record<string, string>;
+  edgeLabels: Record<string, string>;
+  groupLabels: Record<string, string>;
+  nodeTypes: Record<string, string>;
+  nodeIcons: Record<string, string>;
+  notes: string[];
+};
+
+function defaultDiagramImageProvider(): ImageGenerationProvider {
+  return "gemini";
+}
+
+function diagramVisualDraftPrompt(generationPrompt: string, diagramType?: string) {
+  return [
+    "Create a high-resolution reference image for an editable Draw.io/diagrams.net diagram.",
+    "This image will be passed to OpenAI vision for structured XML extraction, so every element must be explicit and legible.",
+    "Use an optimized layout with no overlapping labels, regions, lanes, icons, node text, or edge labels.",
+    "Include concrete diagram primitives whenever relevant: start/end terminators, conditional decision diamonds, input/output parallelograms, process blocks, service/API blocks, data stores/cylinders, queues, documents, cloud/user/icons, image/icon nodes, swimlanes/regions, and directional connectors.",
+    "Use varied block types, arrow styles, edge labels, region boundaries, and iconography that match the requested diagram type.",
+    "Use semantically correct icons from common diagramming conventions: users/actors, servers, APIs/services, databases, object storage, queues/topics, caches, routers, switches, firewalls, load balancers, gateways, cloud/VPC/subnet/region containers, documents, tables/classes, lifelines, UI screens, and external systems.",
+    "Do not use generic boxes when a standard icon or diagram-family shape better communicates the element.",
+    "Supported editable icon/type catalog:",
+    supportedDiagramIconPromptCatalog(),
+    "If the catalog does not fit a domain-specific element, draw a clean custom icon/graphic and make it visually distinct, simple, and suitable for later extraction as a custom-icon image node.",
+    diagramType ? `Diagram type: ${diagramType}.` : "Diagram type: infer the best editable diagram type from the prompt.",
+    generationPrompt
+  ].join("\n");
+}
+
+function applySafeDiagramCorrections(spec: DiagramSpec, corrections: SafeDiagramCorrections): {
+  spec: DiagramSpec;
+  applied: string[];
+} {
+  const applied: string[] = [];
+  const nodeIds = new Set(spec.nodes.map((node) => node.id).filter((id): id is string => Boolean(id)));
+  const edgeIds = new Set(spec.edges.map((edge) => edge.id).filter((id): id is string => Boolean(id)));
+  const groupIds = new Set(spec.groups.map((group) => group.id).filter((id): id is string => Boolean(id)));
+
+  const next: DiagramSpec = {
+    ...spec,
+    nodes: spec.nodes.map((node) => {
+      if (!node.id || !nodeIds.has(node.id)) return node;
+      const label = corrections.nodeLabels[node.id]?.trim();
+      const type = corrections.nodeTypes[node.id]?.trim();
+      const icon = corrections.nodeIcons[node.id]?.trim();
+      const nextNode = { ...node };
+
+      if (label && label !== node.label) {
+        nextNode.label = label;
+        applied.push(`node label:${node.id}`);
+      }
+
+      if (type && type !== node.type) {
+        nextNode.type = type;
+        applied.push(`node type:${node.id}`);
+      }
+
+      if (icon && icon !== node.attributes?.icon) {
+        nextNode.attributes = { ...(node.attributes ?? {}), icon };
+        applied.push(`node icon:${node.id}`);
+      }
+
+      return nextNode;
+    }),
+    edges: spec.edges.map((edge) => {
+      if (!edge.id || !edgeIds.has(edge.id)) return edge;
+      const label = corrections.edgeLabels[edge.id]?.trim();
+
+      if (!label || label === edge.label) return edge;
+      applied.push(`edge label:${edge.id}`);
+      return { ...edge, label };
+    }),
+    groups: spec.groups.map((group) => {
+      if (!group.id || !groupIds.has(group.id)) return group;
+      const label = corrections.groupLabels[group.id]?.trim();
+
+      if (!label || label === group.label) return group;
+      applied.push(`group label:${group.id}`);
+      return { ...group, label };
+    })
+  };
+
+  return { spec: next, applied };
+}
+
+function applySafeCorrectionsToModel(model: DiagramModel, corrections: SafeDiagramCorrections): DiagramModel {
+  return {
+    ...model,
+    nodes: model.nodes.map((node) => ({
+      ...node,
+      label: corrections.nodeLabels[node.id]?.trim() || node.label,
+      type: corrections.nodeTypes[node.id]?.trim() || node.type,
+      style: {
+        ...node.style,
+        ...(corrections.nodeIcons[node.id]?.trim() ? { icon: corrections.nodeIcons[node.id].trim() } : {})
+      }
+    })),
+    edges: model.edges.map((edge) => ({
+      ...edge,
+      label: corrections.edgeLabels[edge.id]?.trim() || edge.label
+    })),
+    groups: model.groups.map((group) => ({
+      ...group,
+      label: corrections.groupLabels[group.id]?.trim() || group.label
+    }))
+  };
+}
 
 export async function runDiagramImportPipeline(
   input: DiagramImportWorkflowInput
@@ -30,13 +144,16 @@ export async function runDiagramImportPipeline(
     metadata: { pipelineName: "diagram-import", status: "started", fileName: input.fileName }
   });
 
-  const validation = validateAndRepairDrawioXml(input.xml);
+  const sourceIsMermaid = isMermaidDiagram(input.xml) || /\.(mmd|mermaid|md)$/i.test(input.fileName ?? "");
+  const diagramSpec = sourceIsMermaid ? parseMermaidToDiagramSpec(input.xml, input.fileName ?? "Mermaid diagram") : undefined;
+  const importedXml = diagramSpec ? createDrawioXmlFromModel(createDiagramModelFromSpec(diagramSpec)) : input.xml;
+  const validation = validateAndRepairDrawioXml(importedXml);
 
   if (!validation.valid) {
     throw new Error(`Imported XML is invalid: ${validation.errors.join(" ")}`);
   }
 
-  const diagramModel = parseDrawioXmlToDiagramModel(validation.xml);
+  const diagramModel = diagramSpec ? createDiagramModelFromSpec(diagramSpec) : parseDrawioXmlToDiagramModel(validation.xml);
   const artifact = await persistArtifactForVersion({
     sessionId: input.sessionId,
     versionId: version.id,
@@ -46,6 +163,7 @@ export async function runDiagramImportPipeline(
     data: Buffer.from(validation.xml, "utf8"),
     metadata: {
       pipelineName: "diagram-import",
+      sourceFormat: sourceIsMermaid ? "mermaid" : "drawio",
       repairApplied: validation.repairApplied,
       notes: validation.notes
     }
@@ -58,6 +176,7 @@ export async function runDiagramImportPipeline(
       pipelineName: "diagram-import",
       status: "completed",
       artifactId: artifact.id,
+      sourceFormat: sourceIsMermaid ? "mermaid" : "drawio",
       repairApplied: validation.repairApplied
     }
   });
@@ -76,13 +195,21 @@ export async function runDiagramGenerationPipeline(
   input: DiagramGenerationWorkflowInput
 ): Promise<DiagramGenerationWorkflowResult> {
   const models = getOpenAIModelConfig();
+  const googleModels = getGoogleImageModelConfig();
+  const imageProvider = defaultDiagramImageProvider();
   const version = await createVersionStep({
     sessionId: input.sessionId,
     parentVersionId: input.parentVersionId,
     stepType: "prompt",
     mode: "diagram",
     prompt: input.prompt,
-    metadata: { pipelineName: "diagram-generation", status: "started" }
+    metadata: {
+      pipelineName: "diagram-generation",
+      status: "started",
+      requestedDiagramType: input.diagramType,
+      imageProvider,
+      diagramTypeSource: "openai-inferred"
+    }
   });
 
   const traceBase = {
@@ -91,17 +218,75 @@ export async function runDiagramGenerationPipeline(
     pipelineName: "diagram-generation"
   };
 
-  const { result: diagramSpec } = await runTracedStage(
+  const expandedDiagramPrompt = (
+    await runTracedStage(
+      {
+        ...traceBase,
+        stageName: "infer-and-expand-diagram-prompt",
+        inputSummary: summarizeForTrace({ prompt: input.prompt, requestedDiagramType: input.diagramType }),
+        modelUsed: models.textModel
+      },
+      () => openAIWorkflowService.inferAndExpandDiagramPrompt(input.prompt)
+    )
+  ).result;
+
+  const inferredDiagramType = expandedDiagramPrompt.diagramType;
+  const expandedPrompt = expandedDiagramPrompt.expandedPrompt;
+  const generationPrompt = expandedPrompt;
+
+  const visualDraft = (
+    await runTracedStage(
+      {
+        ...traceBase,
+        stageName: "generate-gemini-visual-draft-image",
+        inputSummary: summarizeForTrace({ prompt: generationPrompt, diagramType: inferredDiagramType, provider: "gemini" }),
+        modelUsed: googleModels.imageModel
+      },
+      () => googleImageClient.generateImage(diagramVisualDraftPrompt(generationPrompt, inferredDiagramType)),
+      (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType })
+    )
+  ).result;
+
+  const visualDraftArtifact = visualDraft
+    ? await persistArtifactForVersion({
+        sessionId: input.sessionId,
+        versionId: version.id,
+        artifactType: "preview",
+        fileName: "diagram-visual-draft.png",
+        mimeType: visualDraft.mimeType,
+        data: visualDraft.image,
+        metadata: {
+          pipelineName: "diagram-generation",
+          role: "visual-draft",
+          provider: "gemini",
+          modelUsed: visualDraft.modelUsed,
+          text: "text" in visualDraft ? visualDraft.text : undefined
+        }
+      })
+    : undefined;
+
+  let { result: diagramSpec } = await runTracedStage(
     {
       ...traceBase,
-      stageName: "generate-diagram-spec",
-      inputSummary: summarizeForTrace({ prompt: input.prompt }),
+      stageName: "gemini-image-to-openai-diagram-spec",
+      inputSummary: summarizeForTrace({
+        prompt: generationPrompt,
+        diagramType: inferredDiagramType,
+        hasVisualDraft: true,
+        extractionRoute: "diagram image + extraction prompt -> OpenAI"
+      }),
       modelUsed: models.textModel
     },
-    () => openAIWorkflowService.generateDiagramSpec(input.prompt)
+    () =>
+      openAIWorkflowService.generateDiagramSpecFromImage(
+        visualDraft.image,
+        generationPrompt,
+        inferredDiagramType,
+        visualDraft.mimeType
+      )
   );
 
-  const { result: diagramModel } = await runTracedStage(
+  let { result: diagramModel } = await runTracedStage(
     {
       ...traceBase,
       stageName: "spec-to-diagram-model",
@@ -110,7 +295,7 @@ export async function runDiagramGenerationPipeline(
     async () => createDiagramModelFromSpec(diagramSpec)
   );
 
-  const { result: generatedXml } = await runTracedStage(
+  let { result: generatedXml } = await runTracedStage(
     {
       ...traceBase,
       stageName: "diagram-model-to-xml",
@@ -120,7 +305,7 @@ export async function runDiagramGenerationPipeline(
     (xml) => summarizeForTrace({ xmlLength: xml.length })
   );
 
-  const { result: validation } = await runTracedStage(
+  let { result: validation } = await runTracedStage(
     {
       ...traceBase,
       stageName: "validate-and-repair-xml",
@@ -128,6 +313,86 @@ export async function runDiagramGenerationPipeline(
     },
     async () => validateAndRepairDrawioXml(generatedXml)
   );
+
+  const renderedDiagramSvg = createDiagramSvgFromModel(diagramModel);
+  const renderedDiagramArtifact = await persistArtifactForVersion({
+    sessionId: input.sessionId,
+    versionId: version.id,
+    artifactType: "preview",
+    fileName: "diagram-rendered.svg",
+    mimeType: "image/svg+xml",
+    data: Buffer.from(renderedDiagramSvg, "utf8"),
+    metadata: {
+      pipelineName: "diagram-generation",
+      role: "rendered-verification-snapshot",
+      source: "diagram-model"
+    }
+  });
+
+  const verificationEnabled = process.env.DIAGRAM_VERIFICATION_ENABLED !== "false";
+  let verification:
+    | {
+        matchesIntent: boolean;
+        confidence: number;
+        issues: string[];
+        correctionSummary: string;
+      }
+    | undefined;
+  let verificationRepairApplied = false;
+  let verificationAppliedCorrections: string[] = [];
+
+  if (verificationEnabled) {
+    try {
+      const renderedDiagramPng = await rasterizeSvgToPng(renderedDiagramSvg);
+      const verificationResult = (
+        await runTracedStage(
+          {
+            ...traceBase,
+            stageName: "verify-rendered-diagram",
+            inputSummary: summarizeForTrace({
+              prompt: generationPrompt,
+              diagramType: inferredDiagramType,
+              renderedDiagramArtifactId: renderedDiagramArtifact.id,
+              renderedImageFormat: renderedDiagramPng ? "image/png" : "structured-spec-only"
+            }),
+            modelUsed: models.textModel
+          },
+          () =>
+            openAIWorkflowService.verifyDiagramAgainstPrompt(
+              renderedDiagramPng ?? Buffer.alloc(0),
+              generationPrompt,
+              diagramSpec,
+              inferredDiagramType,
+              renderedDiagramPng ? "image/png" : "application/json"
+            )
+        )
+      ).result;
+
+      verification = {
+        matchesIntent: verificationResult.matchesIntent,
+        confidence: verificationResult.confidence,
+        issues: verificationResult.issues,
+        correctionSummary: verificationResult.correctionSummary
+      };
+
+      if (!verificationResult.matchesIntent) {
+        const correction = applySafeDiagramCorrections(diagramSpec, verificationResult.safeCorrections);
+        verificationAppliedCorrections = correction.applied;
+        verificationRepairApplied = correction.applied.length > 0;
+        diagramSpec = correction.spec;
+        diagramModel = applySafeCorrectionsToModel(diagramModel, verificationResult.safeCorrections);
+        generatedXml = createDrawioXmlFromModel(diagramModel);
+        validation = validateAndRepairDrawioXml(generatedXml);
+      }
+    } catch (error) {
+      verification = {
+        matchesIntent: true,
+        confidence: 0,
+        issues: [`Verification skipped: ${(error as Error).message}`],
+        correctionSummary: "The generated diagram was preserved because verification could not complete."
+      };
+    }
+  }
 
   const artifact = await persistArtifactForVersion({
     sessionId: input.sessionId,
@@ -138,6 +403,20 @@ export async function runDiagramGenerationPipeline(
     data: Buffer.from(validation.xml, "utf8"),
     metadata: {
       pipelineName: "diagram-generation",
+      diagramType: inferredDiagramType,
+      diagramTypeInference: {
+        diagramType: expandedDiagramPrompt.diagramType,
+        confidence: expandedDiagramPrompt.confidence,
+        reasoningSummary: expandedDiagramPrompt.reasoningSummary,
+        expertFraming: expandedDiagramPrompt.expertFraming
+      },
+      expandedPrompt,
+      visualDraftArtifactId: visualDraftArtifact?.id,
+      renderedDiagramArtifactId: renderedDiagramArtifact.id,
+      imageProvider,
+      verification,
+      verificationRepairApplied,
+      verificationAppliedCorrections,
       repairApplied: validation.repairApplied,
       notes: validation.notes
     }
@@ -150,12 +429,29 @@ export async function runDiagramGenerationPipeline(
       pipelineName: "diagram-generation",
       status: "completed",
       artifactId: artifact.id,
+      diagramType: inferredDiagramType,
+      diagramTypeInference: {
+        diagramType: expandedDiagramPrompt.diagramType,
+        confidence: expandedDiagramPrompt.confidence,
+        reasoningSummary: expandedDiagramPrompt.reasoningSummary,
+        expertFraming: expandedDiagramPrompt.expertFraming
+      },
+      expandedPrompt,
+      visualDraftArtifactId: visualDraftArtifact?.id,
+      renderedDiagramArtifactId: renderedDiagramArtifact.id,
+      imageProvider,
+      verification,
+      verificationRepairApplied,
+      verificationAppliedCorrections,
       repairApplied: validation.repairApplied
     }
   });
 
   return {
     versionId: version.id,
+    inferredDiagramType,
+    expandedPrompt,
+    visualDraftArtifactId: visualDraftArtifact?.id,
     diagramSpec,
     diagramModel,
     xml: validation.xml,
@@ -256,11 +552,13 @@ export async function runDiagramEditingPipeline(
     }
   });
 
+  const diagramModel = parseDrawioXmlToDiagramModel(validation.xml);
+
   await updateVersionStructuredState({
     versionId: version.id,
     parsedIntent,
     editingAnalysis,
-    diagramModel: input.diagramModel,
+    diagramModel,
     metadata: {
       pipelineName: "diagram-editing",
       status: "completed",
@@ -274,6 +572,7 @@ export async function runDiagramEditingPipeline(
     parsedIntent,
     targetAnalysis,
     editingAnalysis,
+    diagramModel,
     xml: validation.xml,
     repairApplied: validation.repairApplied,
     artifactId: artifact.id

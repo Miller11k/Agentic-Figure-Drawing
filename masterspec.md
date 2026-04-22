@@ -1,6 +1,6 @@
 You are building a full-stack software system called:
 
-# OpenAI-Native Stateful Diagram and Image Editing Platform
+# OpenAI-Native / Google-Native Stateful Diagram and Image Editing Platform
 
 The goal is to implement a serious engineering prototype of a browser-based, stateful, multimodal editing environment that supports:
 
@@ -20,10 +20,10 @@ This project should preserve the same overall product capabilities and architect
 - do not use ComfyUI
 - do not use external local model orchestration tools
 - do not use external diagram-generation model services
-- do not use non-OpenAI image pipelines
+- do not use non-OpenAI or non-Google image pipelines
 - use OpenAI API for all model-driven capabilities
 - use multiple OpenAI API calls to simulate layered reasoning and structured multi-stage pipelines
-- use OpenAI image generation/editing for image workflows
+- use OpenAI/Google image generation/editing for image workflows
 - use OpenAI reasoning/text generation calls for diagram planning, XML generation, edit planning, validation, and repair
 
 The result should feel like a robust, stateful application rather than a thin chatbot wrapper.

@@ -45,6 +45,16 @@ describe("Draw.io XML pipeline", () => {
     expect(reparsed.groups.map((group) => group.id)).toEqual(model.groups.map((group) => group.id));
   });
 
+  it("preserves non-standard mxCell attributes where practical", () => {
+    const xml =
+      '<mxfile><diagram name="Attrs"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="node_a" value="A" vertex="1" parent="1" connectable="0" custom:data="kept"><mxGeometry x="10" y="20" width="120" height="60" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>';
+    const model = parseDrawioXmlToDiagramModel(xml);
+    const outputXml = createDrawioXmlFromModel(model);
+
+    expect(outputXml).toContain('connectable="0"');
+    expect(outputXml).toContain('custom:data="kept"');
+  });
+
   it("creates deterministic DiagramModel layout from DiagramSpec and serializes it", () => {
     const spec: DiagramSpec = {
       title: "Generated Architecture",
@@ -68,7 +78,8 @@ describe("Draw.io XML pipeline", () => {
     const reparsed = parseDrawioXmlToDiagramModel(xml);
 
     expect(model.nodes[0].id).toBe("node_api_gateway");
-    expect(model.nodes[0].boundingBox).toEqual({ x: 80, y: 80, width: 150, height: 70 });
+    expect(model.nodes[0].boundingBox).toMatchObject({ x: 80, y: 80, height: 70 });
+    expect(model.nodes[0].boundingBox?.width).toBeGreaterThanOrEqual(150);
     expect(reparsed.edges[0]).toMatchObject({
       sourceId: "node_api_gateway",
       targetId: "node_backend_service"

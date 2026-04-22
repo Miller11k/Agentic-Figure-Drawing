@@ -165,6 +165,14 @@ export type DirectDiagramEditOperation =
       y: number;
     }
   | {
+      type: "resize-node";
+      nodeId: string;
+      x?: number;
+      y?: number;
+      width: number;
+      height: number;
+    }
+  | {
       type: "add-node";
       node: {
         id?: string;
@@ -173,6 +181,7 @@ export type DirectDiagramEditOperation =
         y?: number;
         width?: number;
         height?: number;
+        type?: string;
         groupId?: string;
         style?: Record<string, unknown>;
       };
@@ -185,6 +194,19 @@ export type DirectDiagramEditOperation =
       type: "update-node-style";
       nodeId: string;
       style: Record<string, unknown>;
+    }
+  | {
+      type: "update-node-fields";
+      nodeId: string;
+      label?: string;
+      nodeType?: string;
+      groupId?: string;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      style?: Record<string, unknown>;
+      data?: Record<string, unknown>;
     }
   | {
       type: "add-edge";
@@ -204,6 +226,20 @@ export type DirectDiagramEditOperation =
       type: "update-edge-style";
       edgeId: string;
       style: Record<string, unknown>;
+    }
+  | {
+      type: "update-edge-label";
+      edgeId: string;
+      label?: string;
+    }
+  | {
+      type: "update-edge-fields";
+      edgeId: string;
+      label?: string;
+      sourceId?: string;
+      targetId?: string;
+      style?: Record<string, unknown>;
+      data?: Record<string, unknown>;
     }
   | {
       type: "reconnect-edge";

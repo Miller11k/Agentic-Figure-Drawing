@@ -11,6 +11,13 @@ function fakeAdapter(text: string): OpenAIClientAdapter {
         tokenUsage: { totalTokens: 10 }
       };
     },
+    async generateTextFromImage() {
+      return {
+        text,
+        modelUsed: "test-model",
+        tokenUsage: { totalTokens: 10 }
+      };
+    },
     async generateImage() {
       return {
         image: Buffer.from("image"),
@@ -118,6 +125,51 @@ describe("OpenAI workflow service wrappers", () => {
       groups: [],
       layoutHints: {},
       styleHints: {}
+    });
+  });
+
+  it("expands diagram-type prompts as plain text", async () => {
+    const service = new OpenAIWorkflowServiceImpl(fakeAdapter("Create a detailed architecture diagram with labeled edges."));
+
+    await expect(service.expandDiagramPrompt("Show my app", "System architecture")).resolves.toContain(
+      "architecture diagram"
+    );
+  });
+
+  it("infers arbitrary diagram types from freeform prompts", async () => {
+    const service = new OpenAIWorkflowServiceImpl(
+      fakeAdapter(
+        JSON.stringify({
+          diagramType: "BPMN-style swimlane workflow",
+          confidence: 0.93,
+          reasoningSummary: "The prompt asks for roles, handoffs, approvals, and process states.",
+          expertFraming: "Use swimlanes, start/end events, task blocks, gateways, data stores, and labeled handoff edges."
+        })
+      )
+    );
+
+    await expect(service.inferDiagramType("Map the claims approval process across teams")).resolves.toMatchObject({
+      diagramType: "BPMN-style swimlane workflow",
+      confidence: 0.93
+    });
+  });
+
+  it("infers diagram type and expanded prompt in one fast wrapper call", async () => {
+    const service = new OpenAIWorkflowServiceImpl(
+      fakeAdapter(
+        JSON.stringify({
+          diagramType: "UML sequence diagram",
+          confidence: 0.9,
+          reasoningSummary: "The prompt asks for ordered actor interactions.",
+          expertFraming: "Use actors, lifelines, calls, returns, and activation semantics.",
+          expandedPrompt: "Create a UML sequence diagram with actors, lifelines, labeled calls, return messages, and readable spacing."
+        })
+      )
+    );
+
+    await expect(service.inferAndExpandDiagramPrompt("Show login between app, API, and auth service")).resolves.toMatchObject({
+      diagramType: "UML sequence diagram",
+      expandedPrompt: expect.stringContaining("lifelines")
     });
   });
 

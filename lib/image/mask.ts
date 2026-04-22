@@ -16,6 +16,7 @@ export interface Point {
 }
 
 export type MaskBrushMode = "paint" | "erase";
+export type MaskTool = "brush" | "lasso";
 
 export function normalizeCanvasPoint(clientX: number, clientY: number, rect: RectLike, imageSize: ImageSize): Point {
   if (rect.width <= 0 || rect.height <= 0 || imageSize.width <= 0 || imageSize.height <= 0) {
@@ -41,12 +42,28 @@ export function clampMaskOpacity(value: number): number {
   return Math.max(0.15, Math.min(0.9, value));
 }
 
+export function clampFeatherRadius(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(48, Math.round(value)));
+}
+
 export function maskCompositeOperation(mode: MaskBrushMode): GlobalCompositeOperation {
   return mode === "erase" ? "destination-out" : "source-over";
 }
 
 export function maskStrokeStyle(opacity: number): string {
   return `rgba(20, 184, 166, ${clampMaskOpacity(opacity).toFixed(2)})`;
+}
+
+export function overlayAlphaToOpenAIMaskAlpha(alpha: number, maxAlpha: number, feathered = false): number {
+  if (!Number.isFinite(alpha) || !Number.isFinite(maxAlpha) || maxAlpha <= 0) return 255;
+
+  if (!feathered) {
+    return alpha > 8 ? 0 : 255;
+  }
+
+  if (alpha <= 2) return 255;
+  return Math.round(255 - Math.min(1, alpha / maxAlpha) * 255);
 }
 
 export function hasMaskPixels(maskDataUrl?: string | null): boolean {
@@ -59,12 +76,14 @@ export function buildImageEditPayload(input: {
   imageBase64: string;
   maskBase64?: string | null;
   parentVersionId?: string | null;
+  imageProvider?: "openai" | "gemini";
 }) {
   return {
     sessionId: input.sessionId,
     prompt: input.prompt,
     imageBase64: input.imageBase64,
     maskBase64: hasMaskPixels(input.maskBase64) ? input.maskBase64 ?? undefined : undefined,
+    imageProvider: input.imageProvider,
     parentVersionId: input.parentVersionId
   };
 }
@@ -74,6 +93,8 @@ export function describeMaskRequest(input: {
   displaySize: ImageSize;
   brushSize: number;
   mode: MaskBrushMode;
+  tool?: MaskTool;
+  featherRadius?: number;
   maskBase64?: string | null;
 }) {
   const scaleX = input.displaySize.width > 0 ? input.imageSize.width / input.displaySize.width : 0;
@@ -88,6 +109,8 @@ export function describeMaskRequest(input: {
     scaleY,
     brushSize: clampBrushSize(input.brushSize),
     mode: input.mode,
+    tool: input.tool ?? "brush",
+    featherRadius: clampFeatherRadius(input.featherRadius ?? 0),
     hasMask: hasMaskPixels(input.maskBase64)
   };
 }

@@ -33,7 +33,7 @@ const mockGetSessionHistory = vi.fn(async () => ({
   traces: []
 }));
 
-const mockRevertSessionToVersion = vi.fn(async () => ({ id: "clrevert123456789012345678" }));
+const mockRevertSessionToVersion = vi.fn(async (_sessionId: string, versionId: string) => ({ id: versionId }));
 
 vi.mock("@/lib/session", () => ({
   createSession: mockCreateSession,

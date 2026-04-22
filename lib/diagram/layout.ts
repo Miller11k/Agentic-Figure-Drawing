@@ -6,8 +6,10 @@ const X_GAP = 140;
 const Y_GAP = 110;
 const START_X = 80;
 const START_Y = 80;
+const MIN_NODE_GAP = 64;
+const MIN_GROUP_GAP = 72;
 
-export type DiagramLayoutMode = "hierarchical" | "grid" | "radial";
+export type DiagramLayoutMode = "optimized" | "hierarchical" | "grid" | "radial";
 
 function boxFor(node: DiagramNodeModel): BoundingBox {
   return node.boundingBox ?? {
@@ -16,6 +18,46 @@ function boxFor(node: DiagramNodeModel): BoundingBox {
     width: DEFAULT_NODE_WIDTH,
     height: DEFAULT_NODE_HEIGHT
   };
+}
+
+function readableBoxFor(node: DiagramNodeModel): BoundingBox {
+  const current = boxFor(node);
+  const labelLength = Math.max(node.label.length, 8);
+  const type = String(node.type ?? node.style.shape ?? "");
+  const lineCount = Math.max(1, Math.ceil(labelLength / 22));
+  const isDecision = type.includes("decision") || type.includes("diamond") || type.includes("rhombus");
+  const isImageLike = type.includes("image") || type.includes("icon");
+  const isTerminator = type.includes("start") || type.includes("end") || type.includes("terminator");
+  const targetWidth = Math.min(280, Math.max(DEFAULT_NODE_WIDTH, 112 + Math.min(labelLength, 28) * 6));
+  const targetHeight = Math.min(150, Math.max(DEFAULT_NODE_HEIGHT, 52 + lineCount * 18));
+  const width = Math.max(current.width || DEFAULT_NODE_WIDTH, isImageLike ? 190 : isDecision ? 126 : isTerminator ? 140 : targetWidth);
+  const height = Math.max(current.height || DEFAULT_NODE_HEIGHT, isImageLike ? 110 : isDecision ? 106 : isTerminator ? 64 : targetHeight);
+
+  return {
+    ...current,
+    width: Math.round(width),
+    height: Math.round(height)
+  };
+}
+
+function boxesOverlap(a: BoundingBox, b: BoundingBox, padding = 0) {
+  return !(
+    a.x + a.width + padding <= b.x ||
+    b.x + b.width + padding <= a.x ||
+    a.y + a.height + padding <= b.y ||
+    b.y + b.height + padding <= a.y
+  );
+}
+
+function shiftNodes(model: DiagramModel, nodeIds: Set<string>, dx: number, dy: number) {
+  for (const node of model.nodes) {
+    if (!nodeIds.has(node.id) || !node.boundingBox) continue;
+    node.boundingBox = {
+      ...node.boundingBox,
+      x: Math.round(node.boundingBox.x + dx),
+      y: Math.round(node.boundingBox.y + dy)
+    };
+  }
 }
 
 function cloneModel(model: DiagramModel): DiagramModel {
@@ -85,12 +127,79 @@ function updateGroupBounds(model: DiagramModel) {
     const maxY = Math.max(...boxes.map((box) => box.y + box.height));
 
     group.boundingBox = {
-      x: minX - 36,
-      y: minY - 54,
-      width: maxX - minX + 72,
-      height: maxY - minY + 90
+      x: minX - 44,
+      y: minY - 78,
+      width: maxX - minX + 88,
+      height: maxY - minY + 132
     };
   }
+}
+
+function resolveGroupOverlaps(model: DiagramModel) {
+  if (model.groups.length < 2) return;
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    let shifted = false;
+    updateGroupBounds(model);
+    const groups = [...model.groups].sort((a, b) => {
+      const ay = a.boundingBox?.y ?? 0;
+      const by = b.boundingBox?.y ?? 0;
+      return ay - by || a.id.localeCompare(b.id);
+    });
+
+    for (let i = 0; i < groups.length; i += 1) {
+      const first = groups[i];
+      const firstBox = first.boundingBox;
+      if (!firstBox) continue;
+
+      for (let j = i + 1; j < groups.length; j += 1) {
+        const second = groups[j];
+        const secondBox = second.boundingBox;
+        if (!secondBox) continue;
+        const firstMembers = new Set(first.nodeIds);
+        const sharesMembers = second.nodeIds.some((nodeId) => firstMembers.has(nodeId));
+
+        if (sharesMembers || !boxesOverlap(firstBox, secondBox, MIN_GROUP_GAP)) continue;
+
+        const dy = firstBox.y + firstBox.height + MIN_GROUP_GAP - secondBox.y;
+        shiftNodes(model, new Set(second.nodeIds), 0, dy);
+        shifted = true;
+      }
+    }
+
+    if (!shifted) break;
+  }
+
+  updateGroupBounds(model);
+}
+
+function normalizeLayoutOrigin(model: DiagramModel, padding = START_X) {
+  const boxes = model.nodes.map((node) => node.boundingBox).filter((box): box is BoundingBox => Boolean(box));
+  if (boxes.length === 0) return;
+
+  const minX = Math.min(...boxes.map((box) => box.x));
+  const minY = Math.min(...boxes.map((box) => box.y));
+  const dx = padding - minX;
+  const dy = padding - minY;
+
+  for (const node of model.nodes) {
+    if (node.boundingBox) {
+      node.boundingBox = {
+        ...node.boundingBox,
+        x: Math.round(node.boundingBox.x + dx),
+        y: Math.round(node.boundingBox.y + dy)
+      };
+    }
+  }
+}
+
+function edgeDegree(model: DiagramModel) {
+  const degree = new Map(model.nodes.map((node) => [node.id, 0]));
+  for (const edge of model.edges) {
+    degree.set(edge.sourceId, (degree.get(edge.sourceId) ?? 0) + 1);
+    degree.set(edge.targetId, (degree.get(edge.targetId) ?? 0) + 1);
+  }
+  return degree;
 }
 
 export function applyGridLayout(diagramModel: DiagramModel): DiagramModel {
@@ -100,18 +209,19 @@ export function applyGridLayout(diagramModel: DiagramModel): DiagramModel {
   model.nodes
     .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
     .forEach((node, index) => {
-      const current = boxFor(node);
+      const current = readableBoxFor(node);
       const column = index % columns;
       const row = Math.floor(index / columns);
       node.boundingBox = {
-        x: START_X + column * (DEFAULT_NODE_WIDTH + X_GAP),
-        y: START_Y + row * (DEFAULT_NODE_HEIGHT + Y_GAP),
-        width: current.width || DEFAULT_NODE_WIDTH,
-        height: current.height || DEFAULT_NODE_HEIGHT
+        x: START_X + column * (current.width + X_GAP + MIN_NODE_GAP),
+        y: START_Y + row * (current.height + Y_GAP + MIN_NODE_GAP),
+        width: current.width,
+        height: current.height
       };
     });
 
   updateGroupBounds(model);
+  resolveGroupOverlaps(model);
   model.layoutMetadata = {
     ...model.layoutMetadata,
     layout: "deterministic-grid",
@@ -131,17 +241,18 @@ export function applyRadialLayout(diagramModel: DiagramModel): DiagramModel {
   model.nodes
     .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
     .forEach((node, index) => {
-      const current = boxFor(node);
+      const current = readableBoxFor(node);
       const angle = model.nodes.length <= 1 ? 0 : (index / model.nodes.length) * Math.PI * 2 - Math.PI / 2;
       node.boundingBox = {
         x: Math.round(center.x + Math.cos(angle) * radius - current.width / 2),
         y: Math.round(center.y + Math.sin(angle) * radius - current.height / 2),
-        width: current.width || DEFAULT_NODE_WIDTH,
-        height: current.height || DEFAULT_NODE_HEIGHT
+        width: current.width,
+        height: current.height
       };
     });
 
   updateGroupBounds(model);
+  resolveGroupOverlaps(model);
   model.layoutMetadata = {
     ...model.layoutMetadata,
     layout: "deterministic-radial",
@@ -168,17 +279,18 @@ export function applyHierarchicalLayout(diagramModel: DiagramModel): DiagramMode
     nodes
       .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
       .forEach((node, index) => {
-        const current = boxFor(node);
+        const current = readableBoxFor(node);
         node.boundingBox = {
-          x: START_X + depth * (DEFAULT_NODE_WIDTH + X_GAP),
-          y: START_Y + index * (DEFAULT_NODE_HEIGHT + Y_GAP),
-          width: current.width || DEFAULT_NODE_WIDTH,
-          height: current.height || DEFAULT_NODE_HEIGHT
+          x: START_X + depth * (DEFAULT_NODE_WIDTH + X_GAP + MIN_NODE_GAP),
+          y: START_Y + index * (current.height + Y_GAP + MIN_NODE_GAP),
+          width: current.width,
+          height: current.height
         };
       });
   }
 
   updateGroupBounds(model);
+  resolveGroupOverlaps(model);
   model.layoutMetadata = {
     ...model.layoutMetadata,
     layout: "deterministic-hierarchical",
@@ -190,7 +302,96 @@ export function applyHierarchicalLayout(diagramModel: DiagramModel): DiagramMode
   return model;
 }
 
+export function applyOptimizedLayout(diagramModel: DiagramModel): DiagramModel {
+  const model = cloneModel(diagramModel);
+
+  if (model.nodes.length <= 1) {
+    return applyGridLayout(model);
+  }
+
+  const depths = computeDepths(model.nodes, model.edges);
+  const maxDepth = Math.max(0, ...Array.from(depths.values()));
+  const connectedNodeIds = new Set(model.edges.flatMap((edge) => [edge.sourceId, edge.targetId]));
+  const degree = edgeDegree(model);
+  const hasMeaningfulFlow = model.edges.length > 0 && maxDepth > 0;
+  const hasGroups = model.groups.some((group) => group.nodeIds.length > 0);
+  const isDense = model.edges.length > Math.max(3, model.nodes.length * 1.35);
+
+  if (!hasMeaningfulFlow || isDense) {
+    const radial = applyRadialLayout(model);
+    radial.layoutMetadata = {
+      ...radial.layoutMetadata,
+      layout: "deterministic-optimized-radial",
+      layoutReason: isDense ? "dense graph" : "no directed flow"
+    };
+    return radial;
+  }
+
+  const columns = new Map<number, DiagramNodeModel[]>();
+  for (const node of model.nodes) {
+    const depth = connectedNodeIds.has(node.id) ? depths.get(node.id) ?? 0 : maxDepth + 1;
+    const bucket = columns.get(depth) ?? [];
+    bucket.push(node);
+    columns.set(depth, bucket);
+  }
+
+  const sortedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
+  const maxRows = Math.max(...Array.from(columns.values()).map((nodes) => nodes.length));
+  const maxNodeWidth = Math.max(DEFAULT_NODE_WIDTH, ...model.nodes.map((node) => readableBoxFor(node).width));
+  const columnGap = Math.max(X_GAP + 130, model.nodes.length > 8 ? X_GAP + 180 : X_GAP + 120);
+  const rowGap = Math.max(Y_GAP + 70, maxRows > 4 ? Y_GAP + 95 : Y_GAP + 70);
+  const sortedColumns = new Map<number, DiagramNodeModel[]>();
+  const columnHeights = new Map<number, number>();
+  const maxColumnHeight = Math.max(
+    ...sortedDepths.map((depth) => {
+      const nodes = [...(columns.get(depth) ?? [])].sort((a, b) => {
+        const groupCompare = (a.groupId ?? "").localeCompare(b.groupId ?? "");
+        if (hasGroups && groupCompare !== 0) return groupCompare;
+        return (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
+      });
+      sortedColumns.set(depth, nodes);
+      const height = nodes.reduce((sum, node) => sum + readableBoxFor(node).height, 0) + Math.max(0, nodes.length - 1) * rowGap;
+      columnHeights.set(depth, height);
+      return height;
+    })
+  );
+
+  for (const depth of sortedDepths) {
+    const nodes = sortedColumns.get(depth) ?? [];
+    let y = START_Y + (maxColumnHeight - (columnHeights.get(depth) ?? 0)) / 2;
+    for (const node of nodes) {
+      const current = readableBoxFor(node);
+      node.boundingBox = {
+        x: START_X + depth * (maxNodeWidth + columnGap),
+        y: Math.round(y),
+        width: current.width,
+        height: current.height
+      };
+      y += current.height + rowGap;
+    }
+  }
+
+  normalizeLayoutOrigin(model);
+  updateGroupBounds(model);
+  resolveGroupOverlaps(model);
+  model.layoutMetadata = {
+    ...model.layoutMetadata,
+    layout: "deterministic-optimized",
+    layoutUpdatedAt: new Date(0).toISOString(),
+    layoutReason: hasGroups ? "directed flow with grouped regions" : "directed flow",
+    nodeWidth: DEFAULT_NODE_WIDTH,
+    nodeHeight: DEFAULT_NODE_HEIGHT,
+    columnGap,
+    rowGap,
+    overlapAvoidance: true,
+    labelReadability: "node-size-and-region-aware"
+  };
+
+  return model;
+}
+
 export function applyDiagramLayout(diagramModel: DiagramModel, mode: DiagramLayoutMode): DiagramModel {
+  if (mode === "optimized") return applyOptimizedLayout(diagramModel);
   if (mode === "grid") return applyGridLayout(diagramModel);
   if (mode === "radial") return applyRadialLayout(diagramModel);
   return applyHierarchicalLayout(diagramModel);

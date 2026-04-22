@@ -89,4 +89,44 @@ describe("direct diagram edits", () => {
 
     expect(edited.edges[0].style.strokeColor).toBe("#2563eb");
   });
+
+  it("resizes a node while preserving its id and position", () => {
+    const edited = applyDirectDiagramEdits(model(), [
+      { type: "resize-node", nodeId: "node_a", width: 180, height: 96 }
+    ]);
+
+    expect(edited.nodes[0]).toMatchObject({
+      id: "node_a",
+      boundingBox: { x: 0, y: 0, width: 180, height: 96 }
+    });
+  });
+
+  it("updates editable node and edge fields", () => {
+    const edited = applyDirectDiagramEdits(model(), [
+      { type: "update-node-fields", nodeId: "node_a", label: "API Server", nodeType: "server", width: 190 },
+      { type: "update-edge-fields", edgeId: "edge_ab", label: "HTTPS", targetId: "node_c" }
+    ]);
+
+    expect(edited.nodes[0]).toMatchObject({
+      label: "API Server",
+      type: "server",
+      boundingBox: { x: 0, y: 0, width: 190, height: 60 }
+    });
+    expect(edited.edges[0]).toMatchObject({
+      label: "HTTPS",
+      targetId: "node_c"
+    });
+  });
+
+  it("updates and clears edge labels through direct edits", () => {
+    const labeled = applyDirectDiagramEdits(model(), [
+      { type: "update-edge-label", edgeId: "edge_ab", label: "calls" }
+    ]);
+    const cleared = applyDirectDiagramEdits(labeled, [
+      { type: "update-edge-label", edgeId: "edge_ab", label: " " }
+    ]);
+
+    expect(labeled.edges[0].label).toBe("calls");
+    expect(cleared.edges[0].label).toBeUndefined();
+  });
 });

@@ -1,4 +1,5 @@
 import type { ArtifactType, DiagramModel, EditingAnalysis, EditorMode, ParsedEditIntent, SessionStep } from "@/types";
+import type { ImageGenerationProvider } from "@/lib/google";
 
 export interface ApiArtifact {
   id: string;
@@ -63,6 +64,9 @@ export interface DiagramImportResult {
 
 export interface DiagramGenerateResult {
   versionId: string;
+  inferredDiagramType?: string;
+  expandedPrompt?: string;
+  visualDraftArtifactId?: string;
   diagramModel: DiagramModel;
   xml: string;
   artifactId: string;
@@ -78,12 +82,14 @@ export interface ImageWorkflowResult {
   mimeType: string;
   bytes: number | null;
   revisedPrompt?: string;
+  provider?: ImageGenerationProvider;
 }
 
 export interface DiagramEditResult {
   versionId: string;
   parsedIntent: ParsedEditIntent;
   editingAnalysis: EditingAnalysis;
+  diagramModel: DiagramModel;
   xml: string;
   artifactId: string;
 }

@@ -197,54 +197,15 @@ export async function getSessionHistory(sessionId: string) {
 
 export async function revertSessionToVersion(sessionId: string, versionId: string) {
   return prisma.$transaction(async (tx) => {
-    const session = await tx.session.findUniqueOrThrow({
-      where: { id: sessionId },
-      select: { currentVersionId: true }
-    });
     const target = await tx.version.findFirstOrThrow({
-      where: { id: versionId, sessionId },
-      include: { artifacts: true }
+      where: { id: versionId, sessionId }
     });
-
-    const revertVersion = await tx.version.create({
-      data: {
-        sessionId,
-        parentVersionId: session.currentVersionId,
-        stepType: "revert",
-        mode: target.mode,
-        prompt: target.prompt,
-        parsedIntent: target.parsedIntent,
-        editingAnalysis: target.editingAnalysis,
-        diagramModel: target.diagramModel,
-        imageMetadata: target.imageMetadata,
-        metadata: serializeJson({
-          revertedToVersionId: target.id,
-          note: "Non-destructive metadata revert to an earlier version."
-        }),
-        previewArtifactId: target.previewArtifactId
-      }
-    });
-
-    for (const artifact of target.artifacts) {
-      await tx.artifact.create({
-        data: {
-          sessionId,
-          versionId: revertVersion.id,
-          type: artifact.type,
-          storagePath: artifact.storagePath,
-          mimeType: artifact.mimeType,
-          bytes: artifact.bytes,
-          checksum: artifact.checksum,
-          metadata: artifact.metadata
-        }
-      });
-    }
 
     await tx.session.update({
       where: { id: sessionId },
-      data: { currentVersionId: revertVersion.id }
+      data: { currentVersionId: target.id }
     });
 
-    return revertVersion;
+    return target;
   });
 }

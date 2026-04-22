@@ -6,6 +6,7 @@ import type {
   EditingAnalysis,
   ParsedEditIntent
 } from "@/types";
+import type { ImageGenerationProvider } from "@/lib/google";
 
 export interface WorkflowContext {
   sessionId: string;
@@ -14,10 +15,15 @@ export interface WorkflowContext {
 
 export interface DiagramGenerationWorkflowInput extends WorkflowContext {
   prompt: string;
+  diagramType?: string;
+  imageProvider?: ImageGenerationProvider;
 }
 
 export interface DiagramGenerationWorkflowResult {
   versionId: string;
+  inferredDiagramType?: string;
+  expandedPrompt?: string;
+  visualDraftArtifactId?: string;
   diagramSpec: DiagramSpec;
   diagramModel: DiagramModel;
   xml: string;
@@ -50,6 +56,7 @@ export interface DiagramEditingWorkflowResult {
   parsedIntent: ParsedEditIntent;
   targetAnalysis: DiagramTargetAnalysis;
   editingAnalysis: EditingAnalysis;
+  diagramModel: DiagramModel;
   xml: string;
   repairApplied: boolean;
   artifactId: string;
@@ -70,6 +77,7 @@ export interface DiagramDirectEditWorkflowResult {
 
 export interface ImageGenerationWorkflowInput extends WorkflowContext {
   prompt: string;
+  imageProvider?: ImageGenerationProvider;
 }
 
 export interface ImageWorkflowResult {
@@ -81,10 +89,12 @@ export interface ImageWorkflowResult {
   mimeType: string;
   bytes: number | null;
   revisedPrompt?: string;
+  provider?: ImageGenerationProvider;
 }
 
 export interface ImageEditingWorkflowInput extends WorkflowContext {
   prompt: string;
   image: Buffer;
   mask?: Buffer;
+  imageProvider?: ImageGenerationProvider;
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const editorModeSchema = z.enum(["diagram", "image"]);
+export const imageGenerationProviderSchema = z.enum(["openai", "gemini"]);
 
 export const editActionTypeSchema = z.enum([
   "add",
@@ -174,9 +175,46 @@ export const xmlValidationRepairResponseSchema = z.object({
   notes: z.array(z.string())
 });
 
+export const diagramTypeInferenceSchema = z.object({
+  diagramType: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+  reasoningSummary: z.string().default(""),
+  expertFraming: z.string().default("")
+});
+
+export const expandedDiagramPromptSchema = diagramTypeInferenceSchema.extend({
+  expandedPrompt: z.string().min(1)
+});
+
+export const diagramVerificationResponseSchema = z.object({
+  matchesIntent: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  issues: z.array(z.string()).default([]),
+  correctionSummary: z.string().default(""),
+  safeCorrections: z
+    .object({
+      nodeLabels: z.record(z.string()).default({}),
+      edgeLabels: z.record(z.string()).default({}),
+      groupLabels: z.record(z.string()).default({}),
+      nodeTypes: z.record(z.string()).default({}),
+      nodeIcons: z.record(z.string()).default({}),
+      notes: z.array(z.string()).default([])
+    })
+    .default({
+      nodeLabels: {},
+      edgeLabels: {},
+      groupLabels: {},
+      nodeTypes: {},
+      nodeIcons: {},
+      notes: []
+    })
+});
+
 export const diagramGenerateWorkflowRequestSchema = z.object({
   sessionId: z.string().cuid(),
   prompt: z.string().min(1),
+  diagramType: z.string().min(1).max(80).optional(),
+  imageProvider: imageGenerationProviderSchema.optional(),
   parentVersionId: z.string().cuid().nullable().optional()
 });
 
@@ -191,6 +229,7 @@ export const diagramEditWorkflowRequestSchema = z.object({
 export const imageGenerateWorkflowRequestSchema = z.object({
   sessionId: z.string().cuid(),
   prompt: z.string().min(1),
+  imageProvider: imageGenerationProviderSchema.optional(),
   parentVersionId: z.string().cuid().nullable().optional()
 });
 
@@ -214,6 +253,14 @@ export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
     y: z.number()
   }),
   z.object({
+    type: z.literal("resize-node"),
+    nodeId: z.string().min(1),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    width: z.number().min(1),
+    height: z.number().min(1)
+  }),
+  z.object({
     type: z.literal("add-node"),
     node: z.object({
       id: z.string().optional(),
@@ -222,6 +269,7 @@ export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
       y: z.number().optional(),
       width: z.number().optional(),
       height: z.number().optional(),
+      type: z.string().min(1).optional(),
       groupId: z.string().optional(),
       style: z.record(z.unknown()).optional()
     })
@@ -234,6 +282,19 @@ export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("update-node-style"),
     nodeId: z.string().min(1),
     style: z.record(z.unknown())
+  }),
+  z.object({
+    type: z.literal("update-node-fields"),
+    nodeId: z.string().min(1),
+    label: z.string().min(1).optional(),
+    nodeType: z.string().min(1).optional(),
+    groupId: z.string().min(1).optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    width: z.number().min(1).optional(),
+    height: z.number().min(1).optional(),
+    style: z.record(z.unknown()).optional(),
+    data: z.record(z.unknown()).optional()
   }),
   z.object({
     type: z.literal("add-edge"),
@@ -253,6 +314,20 @@ export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("update-edge-style"),
     edgeId: z.string().min(1),
     style: z.record(z.unknown())
+  }),
+  z.object({
+    type: z.literal("update-edge-label"),
+    edgeId: z.string().min(1),
+    label: z.string().optional()
+  }),
+  z.object({
+    type: z.literal("update-edge-fields"),
+    edgeId: z.string().min(1),
+    label: z.string().optional(),
+    sourceId: z.string().min(1).optional(),
+    targetId: z.string().min(1).optional(),
+    style: z.record(z.unknown()).optional(),
+    data: z.record(z.unknown()).optional()
   }),
   z.object({
     type: z.literal("reconnect-edge"),
@@ -299,6 +374,7 @@ export const imageEditWorkflowRequestSchema = z.object({
   prompt: z.string().min(1),
   imageBase64: z.string().min(1),
   maskBase64: z.string().min(1).optional(),
+  imageProvider: imageGenerationProviderSchema.optional(),
   parentVersionId: z.string().cuid().nullable().optional()
 });
 

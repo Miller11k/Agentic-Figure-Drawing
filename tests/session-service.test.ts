@@ -78,35 +78,18 @@ describe("session service hardening", () => {
     );
   });
 
-  it("creates a non-destructive revert version and clones artifact pointers", async () => {
+  it("moves the current version pointer when reverting without creating history", async () => {
     const { revertSessionToVersion } = await import("../lib/session/service");
 
     const result = await revertSessionToVersion("session_1", "target_version");
 
-    expect(result.id).toBe("revert_version");
-    expect(tx.version.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          sessionId: "session_1",
-          parentVersionId: "current_version",
-          stepType: "revert",
-          previewArtifactId: "preview_1"
-        })
-      })
-    );
-    expect(tx.artifact.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          versionId: "revert_version",
-          storagePath: "session/target/diagram.drawio",
-          type: "diagram_xml"
-        })
-      })
-    );
+    expect(result.id).toBe("target_version");
+    expect(tx.version.create).not.toHaveBeenCalled();
+    expect(tx.artifact.create).not.toHaveBeenCalled();
     expect(tx.session.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "session_1" },
-        data: { currentVersionId: "revert_version" }
+        data: { currentVersionId: "target_version" }
       })
     );
   });

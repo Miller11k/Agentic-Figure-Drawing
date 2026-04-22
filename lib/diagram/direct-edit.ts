@@ -1,5 +1,4 @@
 import type { BoundingBox, DiagramEdgeModel, DiagramGroupModel, DiagramModel, DiagramNodeModel, DirectDiagramEditOperation } from "@/types";
-import { applyHierarchicalLayout } from "./layout";
 import { stableDiagramId } from "./model";
 
 function cloneModel(model: DiagramModel): DiagramModel {
@@ -37,6 +36,7 @@ function applyAddNode(model: DiagramModel, operation: Extract<DirectDiagramEditO
     id,
     stableId: id,
     label: operation.node.label,
+    type: operation.node.type,
     groupId: operation.node.groupId,
     boundingBox: {
       x: operation.node.x ?? 80 + model.nodes.length * 40,
@@ -163,6 +163,20 @@ export function applyDirectDiagramEdits(
       };
     }
 
+    if (operation.type === "resize-node") {
+      const node = model.nodes.find((candidate) => candidate.id === operation.nodeId);
+      if (!node) {
+        throw new Error(`Node ${operation.nodeId} was not found.`);
+      }
+      const currentBox = node.boundingBox ?? { x: 80, y: 80, width: 150, height: 70 };
+      node.boundingBox = {
+        x: operation.x ?? currentBox.x,
+        y: operation.y ?? currentBox.y,
+        width: Math.max(48, operation.width),
+        height: Math.max(36, operation.height)
+      };
+    }
+
     if (operation.type === "add-node") {
       applyAddNode(model, operation);
     }
@@ -186,6 +200,45 @@ export function applyDirectDiagramEdits(
       node.style = { ...node.style, ...operation.style };
     }
 
+    if (operation.type === "update-node-fields") {
+      const node = model.nodes.find((candidate) => candidate.id === operation.nodeId);
+      if (!node) {
+        throw new Error(`Node ${operation.nodeId} was not found.`);
+      }
+      if (operation.label?.trim()) {
+        node.label = operation.label.trim();
+      }
+      if (operation.nodeType?.trim()) {
+        node.type = operation.nodeType.trim();
+      }
+      if (operation.groupId !== undefined) {
+        if (operation.groupId && !model.groups.some((group) => group.id === operation.groupId)) {
+          throw new Error(`Group ${operation.groupId} was not found.`);
+        }
+        node.groupId = operation.groupId || undefined;
+      }
+      if (
+        operation.x !== undefined ||
+        operation.y !== undefined ||
+        operation.width !== undefined ||
+        operation.height !== undefined
+      ) {
+        const currentBox = node.boundingBox ?? { x: 80, y: 80, width: 150, height: 70 };
+        node.boundingBox = {
+          x: operation.x ?? currentBox.x,
+          y: operation.y ?? currentBox.y,
+          width: Math.max(48, operation.width ?? currentBox.width),
+          height: Math.max(36, operation.height ?? currentBox.height)
+        };
+      }
+      if (operation.style) {
+        node.style = { ...node.style, ...operation.style };
+      }
+      if (operation.data) {
+        node.data = { ...node.data, ...operation.data };
+      }
+    }
+
     if (operation.type === "add-edge") {
       applyAddEdge(model, operation);
     }
@@ -200,6 +253,43 @@ export function applyDirectDiagramEdits(
         throw new Error(`Edge ${operation.edgeId} was not found.`);
       }
       edge.style = { ...edge.style, ...operation.style };
+    }
+
+    if (operation.type === "update-edge-label") {
+      const edge = model.edges.find((candidate) => candidate.id === operation.edgeId);
+      if (!edge) {
+        throw new Error(`Edge ${operation.edgeId} was not found.`);
+      }
+      edge.label = operation.label?.trim() ? operation.label.trim() : undefined;
+    }
+
+    if (operation.type === "update-edge-fields") {
+      const edge = model.edges.find((candidate) => candidate.id === operation.edgeId);
+      const nodeIds = new Set(model.nodes.map((node) => node.id));
+      if (!edge) {
+        throw new Error(`Edge ${operation.edgeId} was not found.`);
+      }
+      if (operation.sourceId) {
+        if (!nodeIds.has(operation.sourceId)) {
+          throw new Error(`Source node ${operation.sourceId} was not found.`);
+        }
+        edge.sourceId = operation.sourceId;
+      }
+      if (operation.targetId) {
+        if (!nodeIds.has(operation.targetId)) {
+          throw new Error(`Target node ${operation.targetId} was not found.`);
+        }
+        edge.targetId = operation.targetId;
+      }
+      if (operation.label !== undefined) {
+        edge.label = operation.label.trim() ? operation.label.trim() : undefined;
+      }
+      if (operation.style) {
+        edge.style = { ...edge.style, ...operation.style };
+      }
+      if (operation.data) {
+        edge.data = { ...edge.data, ...operation.data };
+      }
     }
 
     if (operation.type === "reconnect-edge") {
@@ -268,8 +358,7 @@ export function applyDirectDiagramEdits(
   }
 
   refreshGroupMembership(model);
-  const shouldRelayout = operations.some((operation) => operation.type === "add-node" || operation.type === "add-edge");
-  const output = shouldRelayout ? applyHierarchicalLayout(model) : model;
+  const output = model;
 
   output.normalized = {
     ...output.normalized,

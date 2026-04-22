@@ -44,6 +44,14 @@ export interface OpenAIClientAdapter {
     model?: string;
     responseFormat?: "json_object" | "text";
   }): Promise<OpenAITextResult>;
+  generateTextFromImage(input: {
+    systemPrompt: string;
+    userPrompt: string;
+    image: Buffer;
+    mimeType: string;
+    model?: string;
+    responseFormat?: "json_object" | "text";
+  }): Promise<OpenAITextResult>;
   generateImage(input: {
     prompt: string;
     model?: string;
@@ -65,6 +73,32 @@ export interface ValidationRepairResult {
   notes: string[];
 }
 
+export interface DiagramTypeInference {
+  diagramType: string;
+  confidence: number;
+  reasoningSummary: string;
+  expertFraming: string;
+}
+
+export interface ExpandedDiagramPrompt extends DiagramTypeInference {
+  expandedPrompt: string;
+}
+
+export interface DiagramVerificationResult {
+  matchesIntent: boolean;
+  confidence: number;
+  issues: string[];
+  correctionSummary: string;
+  safeCorrections: {
+    nodeLabels: Record<string, string>;
+    edgeLabels: Record<string, string>;
+    groupLabels: Record<string, string>;
+    nodeTypes: Record<string, string>;
+    nodeIcons: Record<string, string>;
+    notes: string[];
+  };
+}
+
 export interface OpenAIWorkflowService {
   parseEditIntent(prompt: string, mode: EditorMode, context?: OpenAIStageContext): Promise<ParsedEditIntent>;
   analyzeDiagramTargets(
@@ -78,7 +112,25 @@ export interface OpenAIWorkflowService {
     targetAnalysis: DiagramTargetAnalysis,
     context?: OpenAIStageContext
   ): Promise<EditingAnalysis>;
+  inferAndExpandDiagramPrompt(prompt: string, context?: OpenAIStageContext): Promise<ExpandedDiagramPrompt>;
+  inferDiagramType(prompt: string, context?: OpenAIStageContext): Promise<DiagramTypeInference>;
+  expandDiagramPrompt(prompt: string, diagramType: string, context?: OpenAIStageContext): Promise<string>;
   generateDiagramSpec(prompt: string, context?: OpenAIStageContext): Promise<DiagramSpec>;
+  generateDiagramSpecFromImage(
+    image: Buffer,
+    prompt: string,
+    diagramType?: string,
+    mimeType?: string,
+    context?: OpenAIStageContext
+  ): Promise<DiagramSpec>;
+  verifyDiagramAgainstPrompt(
+    image: Buffer,
+    prompt: string,
+    diagramSpec: DiagramSpec,
+    diagramType?: string,
+    mimeType?: string,
+    context?: OpenAIStageContext
+  ): Promise<DiagramVerificationResult>;
   generateDiagramXmlFromSpec(diagramSpec: DiagramSpec, context?: OpenAIStageContext): Promise<string>;
   transformDiagramXml(
     existingXml: string,

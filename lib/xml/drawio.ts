@@ -76,6 +76,47 @@ function serializeAttributes(attributes: Record<string, string | number | undefi
     .join(" ");
 }
 
+function mxCellAttributesFromData(data: Record<string, unknown> | undefined): Record<string, string> {
+  const mxCell = data?.mxCell;
+  if (!mxCell || typeof mxCell !== "object" || Array.isArray(mxCell)) {
+    return {};
+  }
+
+  const rawAttributes = (mxCell as { rawAttributes?: unknown }).rawAttributes;
+  if (!rawAttributes || typeof rawAttributes !== "object" || Array.isArray(rawAttributes)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(rawAttributes as Record<string, unknown>)
+      .filter(([, value]) => typeof value === "string")
+      .map(([key, value]) => [key, value as string])
+  );
+}
+
+function mxCellAttributesFromStyle(style: Record<string, unknown>): Record<string, string> {
+  const rawAttributes = style.__mxCellRawAttributes;
+  if (!rawAttributes || typeof rawAttributes !== "object" || Array.isArray(rawAttributes)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(rawAttributes as Record<string, unknown>)
+      .filter(([, value]) => typeof value === "string")
+      .map(([key, value]) => [key, value as string])
+  );
+}
+
+function mergeMxCellAttributes(
+  rawAttributes: Record<string, string>,
+  explicit: Record<string, string | number | undefined>
+): Record<string, string | number | undefined> {
+  return {
+    ...rawAttributes,
+    ...explicit
+  };
+}
+
 function numberFromAttribute(value: string | undefined): number | undefined {
   if (value === undefined || value === "") {
     return undefined;
@@ -123,7 +164,7 @@ function styleFromRecord(style: Record<string, unknown>, fallback: string): stri
   }
 
   const entries = Object.entries(style)
-    .filter(([key]) => key !== "raw")
+    .filter(([key]) => key !== "raw" && key !== "__mxCellRawAttributes")
     .map(([key, value]) => (value === true ? key : `${key}=${String(value)}`));
 
   return entries.length > 0 ? `${entries.join(";")};` : fallback;
@@ -323,7 +364,10 @@ export function parseDrawioXmlToDiagramModel(xml: string): DiagramModel {
         .filter((candidate) => candidate.parent === cell.id && candidate.vertex === "1" && !groupIds.has(candidate.id))
         .map((candidate) => candidate.id),
       boundingBox: boundingBoxFromGeometry(cell.geometry),
-      style: styleToRecord(cell.style)
+      style: {
+        ...styleToRecord(cell.style),
+        __mxCellRawAttributes: cell.rawAttributes
+      }
     }));
 
   const nodes: DiagramNodeModel[] = cells
@@ -410,32 +454,32 @@ function serializeGeometry(geometry: BoundingBox | undefined, edge = false): str
 }
 
 function serializeGroup(group: DiagramGroupModel): string {
-  const attributes = serializeAttributes({
+  const attributes = serializeAttributes(mergeMxCellAttributes(mxCellAttributesFromStyle(group.style), {
     id: group.id,
     value: group.label,
     style: styleFromRecord(group.style, DEFAULT_GROUP_STYLE),
     vertex: "1",
     parent: "1"
-  });
+  }));
 
   return `<mxCell ${attributes}>${serializeGeometry(group.boundingBox)}</mxCell>`;
 }
 
 function serializeNode(node: DiagramNodeModel): string {
   const parent = node.groupId ?? "1";
-  const attributes = serializeAttributes({
+  const attributes = serializeAttributes(mergeMxCellAttributes(mxCellAttributesFromData(node.data), {
     id: node.id,
     value: node.label,
     style: styleFromRecord(node.style, DEFAULT_NODE_STYLE),
     vertex: "1",
     parent
-  });
+  }));
 
   return `<mxCell ${attributes}>${serializeGeometry(node.boundingBox)}</mxCell>`;
 }
 
 function serializeEdge(edge: DiagramEdgeModel): string {
-  const attributes = serializeAttributes({
+  const attributes = serializeAttributes(mergeMxCellAttributes(mxCellAttributesFromData(edge.data), {
     id: edge.id,
     value: edge.label,
     style: styleFromRecord(edge.style, DEFAULT_EDGE_STYLE),
@@ -443,7 +487,7 @@ function serializeEdge(edge: DiagramEdgeModel): string {
     parent: "1",
     source: edge.sourceId,
     target: edge.targetId
-  });
+  }));
 
   return `<mxCell ${attributes}>${serializeGeometry(undefined, true)}</mxCell>`;
 }

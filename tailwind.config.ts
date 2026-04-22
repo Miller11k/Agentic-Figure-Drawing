@@ -11,7 +11,13 @@ const config: Config = {
       colors: {
         ink: "#15171a",
         panel: "#f6f8fb",
-        accent: "#0f766e"
+        accent: "#0f766e",
+        apple: {
+          bg: "#f5f5f7",
+          ink: "#1d1d1f",
+          muted: "#86868b",
+          blue: "#0071e3"
+        }
       }
     }
   },

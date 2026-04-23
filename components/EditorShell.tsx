@@ -1,15 +1,30 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import { LeftControlPanel } from "@/components/LeftControlPanel";
 import { Panel, Pill, SkeletonPanel } from "@/components/ui";
-import { DiagramWorkspace } from "@/features/diagram/DiagramWorkspace";
-import { ImageWorkspace } from "@/features/image/ImageWorkspace";
 import { getSessionHistory } from "@/features/session/api";
 import { selectVersionArtifact } from "@/features/session/artifacts";
 import { SessionHistoryPanel } from "@/features/session/SessionHistoryPanel";
 import { useEditorStore } from "@/features/session/store";
+
+const DiagramWorkspace = dynamic(
+  () => import("@/features/diagram/DiagramWorkspace").then((module) => module.DiagramWorkspace),
+  {
+    ssr: false,
+    loading: () => <SkeletonPanel />
+  }
+);
+
+const ImageWorkspace = dynamic(
+  () => import("@/features/image/ImageWorkspace").then((module) => module.ImageWorkspace),
+  {
+    ssr: false,
+    loading: () => <SkeletonPanel />
+  }
+);
 
 export function EditorShell() {
   const {
@@ -17,6 +32,7 @@ export function EditorShell() {
     activeSessionId,
     activeArtifactId,
     activeDiagramModel,
+    activeImageDataUrl,
     showHistory,
     setShowHistory,
     setMode,
@@ -42,16 +58,24 @@ export function EditorShell() {
     const artifactMode = latestStep?.mode ?? mode;
     const latestArtifact =
       selectVersionArtifact(history, history.currentVersionId, artifactMode) ?? history.artifacts.at(-1);
+    const hasLocalUnpersistedImage = artifactMode === "image" && Boolean(activeImageDataUrl) && !activeArtifactId;
 
     setActiveVersion(history.currentVersionId);
     setMode(artifactMode);
+
+    if (hasLocalUnpersistedImage) {
+      setDiagramState(undefined, undefined);
+      return;
+    }
 
     if (latestStep?.diagramModel) {
       setDiagramState(latestStep.diagramModel);
       setActiveImageDataUrl(undefined);
     } else if (artifactMode === "image") {
       setDiagramState(undefined, undefined);
-      setActiveImageDataUrl(undefined);
+      if (latestArtifact) {
+        setActiveImageDataUrl(undefined);
+      }
     }
 
     if (latestArtifact) {
@@ -59,7 +83,9 @@ export function EditorShell() {
     } else {
       setActiveArtifact(undefined);
     }
-  }, [history, mode, setActiveArtifact, setActiveImageDataUrl, setActiveVersion, setDiagramState, setMode]);
+  }, [activeArtifactId, activeImageDataUrl, history, mode, setActiveArtifact, setActiveImageDataUrl, setActiveVersion, setDiagramState, setMode]);
+
+  const keepLocalImageVisible = mode === "image" && Boolean(activeImageDataUrl);
 
   return (
     <main className="min-h-screen overflow-hidden p-4 text-slate-950 lg:p-6">
@@ -94,7 +120,7 @@ export function EditorShell() {
           </header>
 
           <div className="min-h-0 flex-1 p-4 lg:p-5">
-            {historyQuery.isLoading ? (
+            {historyQuery.isLoading && !keepLocalImageVisible ? (
               <SkeletonPanel />
             ) : mode === "diagram" ? (
               <DiagramWorkspace diagramModel={activeDiagramModel} history={history} />

@@ -7,7 +7,8 @@ import {
   editDiagram,
   generateDiagram,
   generateImage,
-  importDiagram
+  importDiagram,
+  uploadArtifact
 } from "@/features/session/api";
 import { useEditorStore } from "@/features/session/store";
 import type { SessionHistoryResponse } from "@/features/session/types";
@@ -61,6 +62,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     setDiagramState,
     setActiveImageDataUrl,
     setImageProvider,
+    requestImageEdit,
     showHistory,
     setShowHistory,
     clearWorkspace
@@ -166,6 +168,36 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     onError: (err) => setError((err as Error).message)
   });
 
+  const uploadImageMutation = useMutation({
+    mutationFn: async (input: { dataUrl: string; fileName: string; mimeType: string }) => {
+      const session = await ensureSession();
+      const result = await uploadArtifact({
+        sessionId: session.sessionId,
+        dataBase64: input.dataUrl,
+        artifactType: "source",
+        mode: "image",
+        fileName: input.fileName,
+        mimeType: input.mimeType
+      });
+
+      return {
+        ...result,
+        sessionId: session.sessionId,
+        localDataUrl: input.dataUrl
+      };
+    },
+    onSuccess: (result) => {
+      setError(null);
+      setMode("image");
+      setActiveVersion(result.versionId);
+      setActiveArtifact(result.artifact.id);
+      setDiagramState(undefined, undefined);
+      setActiveImageDataUrl(result.localDataUrl);
+      invalidate(result.sessionId);
+    },
+    onError: (err) => setError((err as Error).message)
+  });
+
   const triggerImageEdit = async () => {
     if (!activeImageDataUrl && !imageDownloadId) {
       setError("Upload or generate an image before editing it.");
@@ -175,8 +207,11 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setError("Enter an image edit prompt first.");
       return;
     }
-    await ensureSession();
-    window.setTimeout(() => window.dispatchEvent(new CustomEvent("editor:apply-image-edit")), 0);
+    const session = await ensureSession();
+    requestImageEdit({
+      sessionId: session.sessionId,
+      versionId: session.versionId ?? undefined
+    });
   };
 
   const hasActiveContent = Boolean(activeDiagramModel || activeImageDataUrl || imageDownloadId || activeSessionId);
@@ -185,7 +220,8 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     importMutation.isPending ||
     generateDiagramMutation.isPending ||
     editDiagramMutation.isPending ||
-    generateImageMutation.isPending;
+    generateImageMutation.isPending ||
+    uploadImageMutation.isPending;
 
   return (
     <Panel className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
@@ -316,9 +352,12 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
               onChange={async (event) => {
                 const file = event.target.files?.[0];
                 if (file) {
-                  setMode("image");
-                  setActiveImageDataUrl(await readFileAsDataUrl(file));
-                  setActiveArtifact(undefined);
+                  const dataUrl = await readFileAsDataUrl(file);
+                  uploadImageMutation.mutate({
+                    dataUrl,
+                    fileName: file.name,
+                    mimeType: file.type || "image/png"
+                  });
                 }
                 event.currentTarget.value = "";
               }}

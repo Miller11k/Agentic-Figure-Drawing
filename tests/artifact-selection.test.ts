@@ -58,6 +58,13 @@ describe("session artifact selection", () => {
     expect(selectVersionArtifact(history(), "version_1", "image")?.id).toBe("edited_1");
   });
 
+  it("falls back to the uploaded source artifact when no edited image exists", () => {
+    const sourceOnly = history();
+    sourceOnly.artifacts = sourceOnly.artifacts.filter((artifact) => artifact.type !== "image");
+
+    expect(selectVersionArtifact(sourceOnly, "version_1", "image")?.id).toBe("source_1");
+  });
+
   it("honors explicit preview references", () => {
     const withPreview = history();
     withPreview.steps[0].previewReference = "mask_1";

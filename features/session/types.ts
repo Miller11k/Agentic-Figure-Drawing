@@ -85,6 +85,11 @@ export interface ImageWorkflowResult {
   provider?: ImageGenerationProvider;
 }
 
+export interface UploadArtifactResult {
+  versionId: string;
+  artifact: ApiArtifact;
+}
+
 export interface DiagramEditResult {
   versionId: string;
   parsedIntent: ParsedEditIntent;

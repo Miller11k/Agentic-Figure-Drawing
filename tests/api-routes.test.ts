@@ -108,6 +108,18 @@ vi.mock("@/lib/workflows", () => ({
   runDiagramEditingPipeline: vi.fn(async () => workflowResult)
 }));
 
+vi.mock("@/lib/storage", () => ({
+  persistArtifactForVersion: vi.fn(async (input: { sessionId: string; versionId: string; artifactType: string; fileName: string; mimeType: string }) => ({
+    id: "cluploadartifact123456789012",
+    sessionId: input.sessionId,
+    versionId: input.versionId,
+    type: input.artifactType,
+    storagePath: `uploads/${input.fileName}`,
+    mimeType: input.mimeType,
+    createdAt: new Date("2026-04-21T12:00:00.000Z").toISOString()
+  }))
+}));
+
 function jsonRequest(body: unknown) {
   return new Request("http://localhost/api", {
     method: "POST",
@@ -209,5 +221,24 @@ describe("backend API routes", () => {
 
     expect(response.status).toBe(200);
     expect(body.steps).toHaveLength(1);
+  });
+
+  it("uploads an image source artifact", async () => {
+    const { POST } = await import("../app/api/upload/route");
+    const response = await POST(
+      jsonRequest({
+        sessionId: "clsession123456789012345678",
+        artifactType: "source",
+        mode: "image",
+        fileName: "source.png",
+        mimeType: "image/png",
+        dataBase64: Buffer.from("image").toString("base64")
+      })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.versionId).toBe("cluploadversion123456789012");
+    expect(body.artifact.type).toBe("source");
   });
 });

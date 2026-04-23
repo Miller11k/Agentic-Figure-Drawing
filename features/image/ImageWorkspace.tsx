@@ -8,7 +8,6 @@ import {
   clampBrushSize,
   clampFeatherRadius,
   clampMaskOpacity,
-  describeMaskRequest,
   maskExportFileName,
   maskCompositeOperation,
   overlayAlphaToOpenAIMaskAlpha,
@@ -20,19 +19,19 @@ import {
 } from "@/lib/image/mask";
 import { Button } from "@/components/ui";
 
-function readFileAsDataUrl(file: File) {
+function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
 }
 
 async function artifactToDataUrl(artifactId: string) {
   const response = await fetch(artifactDownloadUrl(artifactId));
   const blob = await response.blob();
-  return readFileAsDataUrl(new File([blob], "artifact.png", { type: blob.type || "image/png" }));
+  return blobToDataUrl(blob);
 }
 
 function imageElementToPngDataUrl(image: HTMLImageElement): string {
@@ -155,7 +154,6 @@ function exportOpenAIMask(canvas: HTMLCanvasElement, featherRadius = 0): string 
 
 export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -184,7 +182,9 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
     setMode,
     setActiveArtifact,
     setActiveVersion,
-    setActiveImageDataUrl
+    setActiveImageDataUrl,
+    pendingImageEditRequest,
+    clearPendingImageEditRequest
   } = useEditorStore();
 
   const updateDisplaySize = useCallback(() => {
@@ -300,9 +300,12 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
   };
 
   const editMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeSessionId) throw new Error("Create a session before editing an image.");
-      if (!activeImageDataUrl) throw new Error("Upload or generate an image before editing.");
+    mutationFn: async (input?: { sessionId?: string; versionId?: string }) => {
+      const sessionId = input?.sessionId ?? activeSessionId;
+      const parentVersionId = input?.versionId ?? activeVersionId;
+
+      if (!sessionId) throw new Error("Create a session before editing an image.");
+      if (!activeImageDataUrl && !artifactId) throw new Error("Upload or generate an image before editing.");
       if (!prompt.trim()) throw new Error("Enter an edit prompt first.");
 
       const imageElement = imageRef.current;
@@ -310,17 +313,6 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
 
       const imageBase64 = imageElementToPngDataUrl(imageElement);
       const maskBase64 = canvasRef.current ? exportOpenAIMask(canvasRef.current, featherRadius) : undefined;
-      const requestMetadata = describeMaskRequest({
-        imageSize,
-        displaySize,
-        brushSize,
-        mode: brushMode,
-        tool: maskTool,
-        featherRadius,
-        maskBase64
-      });
-
-      console.info("Image edit mask request", requestMetadata);
 
       const localizedPrompt = maskBase64
         ? [
@@ -331,11 +323,11 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
         : prompt;
 
       return editImage(
-        activeSessionId,
+        sessionId,
         localizedPrompt,
         imageBase64,
         maskBase64,
-        activeVersionId,
+        parentVersionId,
         imageProvider
       );
     },
@@ -356,13 +348,13 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
   });
 
   useEffect(() => {
-    const handleApplyImageEdit = () => {
-      editMutation.mutate();
-    };
-
-    window.addEventListener("editor:apply-image-edit", handleApplyImageEdit);
-    return () => window.removeEventListener("editor:apply-image-edit", handleApplyImageEdit);
-  }, [editMutation]);
+    if (!pendingImageEditRequest || editMutation.isPending) return;
+    clearPendingImageEditRequest(pendingImageEditRequest.id);
+    editMutation.mutate({
+      sessionId: pendingImageEditRequest.sessionId,
+      versionId: pendingImageEditRequest.versionId
+    });
+  }, [clearPendingImageEditRequest, editMutation, pendingImageEditRequest]);
 
   const beginDraw = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || imageSize.width === 0) return;
@@ -403,30 +395,8 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
         <div className="max-w-md text-center">
           <p className="text-xl font-semibold tracking-[-0.03em] text-slate-900">No image loaded</p>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            Generate an image from the left panel or upload a source image here to start prompt-based editing.
+            Generate or upload an image from the left panel to start prompt-based editing.
           </p>
-          <Button
-            variant="primary"
-            className="mt-5"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Upload source image
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              if (file) {
-                setActiveImageDataUrl(await readFileAsDataUrl(file));
-                setLoadedArtifactId(undefined);
-                setImageLoading(true);
-              }
-              event.currentTarget.value = "";
-            }}
-          />
         </div>
       </div>
     );
@@ -437,9 +407,6 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
   return (
     <div className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-[32px] border border-white/70 bg-white/70 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl">
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-200/70 bg-white/58 p-3">
-        <Button onClick={() => fileInputRef.current?.click()}>
-          Upload source
-        </Button>
         <label className="flex items-center gap-2 text-sm text-slate-700">
           Brush
           <input
@@ -521,25 +488,8 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
           Export edit mask
         </Button>
         <span className="ml-auto rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-500">
-          Use Edit current in the left panel
+          Upload and edit from the left panel
         </span>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (file) {
-              setActiveImageDataUrl(await readFileAsDataUrl(file));
-              setLoadedArtifactId(undefined);
-              setImageLoading(true);
-              setUndoStack([]);
-              setRedoStack([]);
-            }
-            event.currentTarget.value = "";
-          }}
-        />
       </div>
 
       {(error || editMutation.isPending) && (
@@ -569,6 +519,8 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
             ref={imageRef}
             src={src}
             alt=""
+            loading="lazy"
+            decoding="async"
             className={`block object-contain transition-opacity ${imageLoading ? "opacity-0" : "opacity-100"}`}
             style={{ width: displaySize.width || undefined, height: displaySize.height || undefined }}
             onLoad={(event) => {

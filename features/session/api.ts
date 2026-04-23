@@ -6,7 +6,8 @@ import type {
   DiagramGenerateResult,
   DiagramImportResult,
   ImageWorkflowResult,
-  SessionHistoryResponse
+  SessionHistoryResponse,
+  UploadArtifactResult
 } from "./types";
 import type { DiagramModel, DirectDiagramEditOperation, EditorMode } from "@/types";
 import { buildImageEditPayload } from "@/lib/image/mask";
@@ -128,4 +129,27 @@ export function editImage(
 
 export function artifactDownloadUrl(artifactId: string) {
   return `/api/download/${artifactId}`;
+}
+
+export function uploadArtifact(input: {
+  sessionId: string;
+  dataBase64: string;
+  artifactType?: "image" | "diagram_xml" | "preview" | "mask" | "source";
+  mode?: EditorMode;
+  versionId?: string | null;
+  fileName?: string;
+  mimeType?: string;
+}) {
+  return requestJson<UploadArtifactResult>("/api/upload", {
+    method: "POST",
+    body: JSON.stringify({
+      sessionId: input.sessionId,
+      dataBase64: input.dataBase64,
+      artifactType: input.artifactType ?? "source",
+      mode: input.mode ?? "image",
+      versionId: input.versionId,
+      fileName: input.fileName,
+      mimeType: input.mimeType
+    })
+  });
 }

@@ -9,6 +9,12 @@ export interface SelectedDiagramElement {
   type: Extract<EditTargetType, "node" | "edge" | "group">;
 }
 
+export interface PendingImageEditRequest {
+  id: number;
+  sessionId: string;
+  versionId?: string;
+}
+
 interface EditorState {
   mode: EditorMode;
   activeSessionId?: string;
@@ -22,6 +28,7 @@ interface EditorState {
   selectedVersionId?: string;
   selectedElement?: SelectedDiagramElement;
   pendingEdgeSourceId?: string;
+  pendingImageEditRequest?: PendingImageEditRequest;
   showHistory: boolean;
   setMode: (mode: EditorMode) => void;
   setPrompt: (prompt: string) => void;
@@ -34,6 +41,8 @@ interface EditorState {
   selectVersion: (versionId?: string) => void;
   selectElement: (element?: SelectedDiagramElement) => void;
   setPendingEdgeSource: (nodeId?: string) => void;
+  requestImageEdit: (request: Omit<PendingImageEditRequest, "id">) => void;
+  clearPendingImageEditRequest: (requestId: number) => void;
   setShowHistory: (showHistory: boolean) => void;
   clearWorkspace: () => void;
 }
@@ -55,6 +64,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   selectVersion: (selectedVersionId) => set({ selectedVersionId }),
   selectElement: (selectedElement) => set({ selectedElement }),
   setPendingEdgeSource: (pendingEdgeSourceId) => set({ pendingEdgeSourceId }),
+  requestImageEdit: (request) =>
+    set({
+      pendingImageEditRequest: {
+        ...request,
+        id: Date.now()
+      }
+    }),
+  clearPendingImageEditRequest: (requestId) =>
+    set((state) => ({
+      pendingImageEditRequest:
+        state.pendingImageEditRequest?.id === requestId ? undefined : state.pendingImageEditRequest
+    })),
   setShowHistory: (showHistory) => set({ showHistory }),
   clearWorkspace: () =>
     set({
@@ -67,6 +88,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       selectedVersionId: undefined,
       selectedElement: undefined,
       pendingEdgeSourceId: undefined,
+      pendingImageEditRequest: undefined,
       prompt: "",
       showHistory: false
     })

@@ -1,0 +1,16 @@
+node_modules
+.next
+.next-build
+coverage
+dist
+.git
+.gitignore
+.env
+.env.local
+openai_secret_key
+public/artifacts
+prisma/dev.db
+prisma/dev.db-journal
+*.log
+Dockerfile
+docker-compose.yml

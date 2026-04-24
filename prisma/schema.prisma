@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id               String               @id @default(cuid())
+  title            String?
+  currentVersionId String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  versions         Version[]
+  artifacts        Artifact[]
+  traces           OpenAITrace[]
+  promptMetadata   PromptEditMetadata[]
+
+  @@map("sessions")
+}
+
+model Version {
+  id               String               @id @default(cuid())
+  sessionId        String
+  parentVersionId  String?
+  stepType         String
+  mode             String
+  prompt           String?
+  parsedIntent     String?
+  editingAnalysis  String?
+  diagramModel     String?
+  imageMetadata    String?
+  metadata         String?
+  previewArtifactId String?
+  createdAt        DateTime             @default(now())
+  session          Session              @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parent           Version?             @relation("VersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  children         Version[]            @relation("VersionParent")
+  artifacts        Artifact[]
+  traces           OpenAITrace[]
+  promptMetadata   PromptEditMetadata[]
+
+  @@index([sessionId, createdAt])
+  @@index([parentVersionId])
+  @@map("versions")
+}
+
+model Artifact {
+  id          String       @id @default(cuid())
+  sessionId   String
+  versionId   String
+  type        String
+  storagePath String
+  mimeType    String
+  bytes       Int?
+  checksum    String?
+  metadata    String?
+  createdAt   DateTime     @default(now())
+  session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  version     Version      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([versionId])
+  @@map("artifacts")
+}
+
+model OpenAITrace {
+  id            String      @id @default(cuid())
+  sessionId     String
+  versionId     String?
+  pipelineName  String
+  stageName     String
+  inputSummary  String
+  outputSummary String?
+  startedAt     DateTime    @default(now())
+  endedAt       DateTime?
+  latencyMs     Int?
+  status        String      @default("pending")
+  repairApplied Boolean     @default(false)
+  modelUsed     String?
+  tokenUsage    String?
+  errorMessage  String?
+  metadata      String?
+  session       Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  version       Version?    @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, startedAt])
+  @@index([versionId])
+  @@map("traces")
+}
+
+model PromptEditMetadata {
+  id              String      @id @default(cuid())
+  sessionId       String
+  versionId       String?
+  rawPrompt       String
+  mode            String
+  parsedIntent    String?
+  editingAnalysis String?
+  requestPayload  String?
+  responsePayload String?
+  status          String      @default("success")
+  createdAt       DateTime    @default(now())
+  session         Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  version         Version?    @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt])
+  @@index([versionId])
+  @@map("prompt_edit_metadata")
+}

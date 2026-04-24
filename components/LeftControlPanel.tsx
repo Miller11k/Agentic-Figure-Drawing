@@ -52,6 +52,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     imageProvider,
     activeSessionId,
     activeVersionId,
+    activeArtifactId,
     activeDiagramModel,
     activeImageDataUrl,
     setMode,
@@ -112,7 +113,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     onError: (err) => setError((err as Error).message)
   });
 
-  const imageDownloadId = history?.artifacts.filter((artifact) => artifact.type === "image").at(-1)?.id;
+  const imageDownloadId = activeArtifactId;
   const currentDiagramXml = activeDiagramModel ? createDrawioXmlFromModel(activeDiagramModel) : undefined;
 
   const generateDiagramMutation = useMutation({

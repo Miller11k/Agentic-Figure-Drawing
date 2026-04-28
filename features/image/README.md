@@ -1,5 +1,12 @@
 # Image Feature
 
-Phase 1 reserves this feature boundary for prompt-based image generation, prompt-based image editing, and mask-aware editing.
+This feature boundary contains the browser-side image workspace. It supports:
 
-Phase 2 should add OpenAI image generation/editing workflows and keep uploaded sources, masks, and generated outputs as versioned artifacts.
+- Prompt-based image generation through the configured provider.
+- Uploaded-image editing.
+- Prompt-based and mask-based image editing.
+- Brush and lasso mask tools.
+- Paint/erase modes, brush size, mask opacity, feathering, undo/redo, clear, and mask export.
+- Downloading current/generated image outputs.
+
+Backend orchestration lives in `lib/workflows/image.ts`. OpenAI is the default provider; Gemini can be selected for image generation and multimodal edit guidance when configured.

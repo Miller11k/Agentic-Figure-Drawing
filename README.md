@@ -1,6 +1,6 @@
 # Agentic Figure Drawing
 
-A session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. The app supports importing Draw.io / diagrams.net XML and Mermaid source, generating structured diagrams from prompts, prompt-guided diagram edits, direct interactive diagram edits, image generation, uploaded-image editing, localized mask edits, artifact downloads, trace inspection, version history, and metadata-layer revert.
+A session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. The app supports importing Draw.io / diagrams.net XML, Mermaid source, and raster reference images; generating structured diagrams from prompts; reconstructing editable diagrams from screenshots/reference images; prompt-guided diagram edits; direct interactive diagram edits; image generation; uploaded-image editing; localized mask edits; artifact downloads; trace inspection; version history; and metadata-layer revert.
 
 The implementation follows `masterspec.md` as the source of truth, with an explicit local override allowing Google Gemini only for image workflows. OpenAI remains the reasoning, validation, and XML authority. Google Gemini can be selected for image generation, diagram visual drafts, and mask-guided image editing; there is no ComfyUI or local non-API model workflow.
 
@@ -10,7 +10,7 @@ The implementation follows `masterspec.md` as the source of truth, with an expli
 - Zustand for client editing/session state
 - TanStack Query for frontend API orchestration
 - Prisma with SQLite by default
-- Draw.io / diagrams.net XML and Mermaid import, repair, serialization, and structured `DiagramModel` conversion
+- Draw.io / diagrams.net XML, Mermaid, and reference-image import with repair, serialization, and structured `DiagramModel` conversion
 - Local filesystem artifact storage abstraction
 - OpenAI API wrappers for structured reasoning, XML repair/editing, image generation, and image editing
 - Optional Google Gemini Nano Banana 2 support for generated images, diagram visual drafts, and mask-guided image edits
@@ -32,13 +32,17 @@ The system is organized as thin UI and API layers over reusable service modules.
 - `features/*` contains frontend domain modules for session state, diagram editing, and image editing.
 - `types/core.ts` defines the shared strongly typed contracts used by backend, workflows, and UI.
 
-The app stores every meaningful operation as a session version. Each version can point to one or more artifacts, such as Draw.io XML, diagram models, image outputs, uploads, or masks. OpenAI and deterministic workflow stages are recorded as traces for report/debug use through API responses, tests, and persisted metadata. The default frontend intentionally hides version ids, observability, artifact internals, and inspector panels so typical users get a cleaner editing surface.
+The app stores every meaningful operation as a session version. Each version can point to one or more artifacts, such as Draw.io XML, diagram models, image outputs, uploads, or masks. OpenAI and deterministic workflow stages are recorded as traces for report/debug use through API responses, tests, and persisted metadata. The default frontend keeps artifact internals, trace inspection, and inspector-style observability out of the primary editing flow, while the history panel still exposes version ids for reproducible debugging and reports.
 
 ## Major Workflows
 
 ### Diagram Import
 
 `POST /api/diagram/import` accepts Draw.io XML or Mermaid source. Draw.io XML is validated and repaired where possible. Mermaid flowchart, graph, sequence, class, and state-style source is normalized into a `DiagramSpec`, converted into a `DiagramModel`, serialized as Draw.io-compatible XML, persisted as artifacts, and stored as a new session version.
+
+The left panel's diagram import control also accepts PNG, JPEG, and WebP reference images. Image imports call `POST /api/diagram/import-image`, persist the source image, ask OpenAI vision to extract an editable `DiagramSpec`, convert that spec into a `DiagramModel`, and store Draw.io-compatible XML. The reconstruction workflow is optimized for editability: visible text becomes editable labels, detected containers become groups, detected nodes/icons become separate movable elements, and detected relationships become connectors where the model can infer them.
+
+Draw.io import/export preserves common geometry and raw `mxCell` attributes where practical. Grouped child nodes are rendered with absolute canvas coordinates for editing and exported back as Draw.io-relative group coordinates. Imported edge waypoints are preserved for closer route fidelity in both the editable canvas and SVG export.
 
 ### Diagram Generation
 
@@ -61,7 +65,7 @@ The app stores every meaningful operation as a session version. Each version can
 
 `POST /api/diagram/direct-edit` accepts structured direct-edit operations from the interactive canvas, applies deterministic model updates, preserves stable ids where possible, serializes to XML, stores artifacts, and creates a new version.
 
-The canvas includes optimized, hierarchical, grid, and radial deterministic layout modes, orthogonal connector routing, explicit fit-to-view, manual zoom controls, scrollable workspace navigation, direct XML export, and version-history undo/redo. Manual zoom is preserved while editing; the canvas only fits the diagram when the user presses the fit control.
+The canvas includes optimized, hierarchical, grid, and radial deterministic layout modes, orthogonal connector routing, imported waypoint rendering, explicit fit-to-view, manual zoom controls, scrollable workspace navigation, source inspection, direct XML export, and version-history undo/redo. Manual zoom is preserved while editing; the canvas only fits the diagram when the user presses the fit control. The diagram workspace has an `Edit` view for interactive SVG editing and a `Source` view for inspecting the exact Draw.io-compatible XML or imported Mermaid source behind the current artifact.
 
 ### Image Generation
 
@@ -69,13 +73,13 @@ The canvas includes optimized, hierarchical, grid, and radial deterministic layo
 
 ### Image Editing and Masks
 
-`POST /api/image/edit` supports uploaded or generated source images plus an optional mask artifact. The frontend mask editor draws directly over the rendered image and normalizes coordinates before request shaping. OpenAI receives the mask through its native mask parameter. Gemini receives the source image and mask image as multimodal input with strict localized-edit instructions. The backend stores edited image outputs and links mask/source metadata into version history.
+`POST /api/image/edit` supports uploaded or generated source images plus an optional mask artifact. The frontend mask editor draws directly over the rendered image and normalizes coordinates before request shaping. OpenAI receives the mask through its native mask parameter. Gemini receives the source image and mask image as multimodal input with strict localized-edit instructions added inside the provider layer. The backend stores edited image outputs and links mask/source metadata into version history without polluting saved user prompts with internal system instructions.
 
 Mask tooling includes paint/erase modes, brush size, opacity, undo/redo, clear, preview visibility, visible overlay export, and edit-mask export.
 
 ### Revert and History
 
-`POST /api/session/:id/revert` moves the session's current-version pointer back to the selected version without creating an extra timeline item. Older history remains immutable, and subsequent edits create new versions from the active state. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state.
+`POST /api/session/:id/revert` moves the session's current-version pointer back to the selected version without creating an extra timeline item. Older history remains immutable, and subsequent edits create new versions from the active state. In the UI, clicking a history card restores the full image or diagram state and updates the session pointer. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state. Browser storage persists lightweight editor state such as the active session, artifact, mode, provider, prompt, and history visibility so refreshes can recover the last workspace when persistence is available.
 
 ## OpenAI Integration Points
 
@@ -155,7 +159,7 @@ DATABASE_URL="file:./dev.db"
 
 Optional model and storage settings are documented in `.env.example`.
 
-To use Nano Banana 2 for image generation, diagram visual drafts, and mask-guided image edits:
+To use Nano Banana 2 for image generation, diagram visual drafts, and mask-guided image edits, set the Google key and switch one or both provider settings:
 
 ```bash
 GOOGLE_API_KEY="your-google-api-key"
@@ -163,6 +167,8 @@ GOOGLE_IMAGE_MODEL="gemini-3.1-flash-image-preview"
 IMAGE_GENERATION_PROVIDER="gemini"
 DIAGRAM_IMAGE_PROVIDER="gemini"
 ```
+
+Leave `IMAGE_GENERATION_PROVIDER` and `DIAGRAM_IMAGE_PROVIDER` unset or set to `openai` when you want OpenAI-only workflows. Diagram generation automatically falls back to direct OpenAI structured generation if the Gemini visual-draft path is unavailable.
 
 Sharp is installed as an application dependency. Diagram verification uses it to convert rendered SVG snapshots into PNG input for OpenAI vision checks when `DIAGRAM_VERIFICATION_ENABLED="true"`.
 
@@ -207,12 +213,14 @@ On Windows or when a dev server is already holding `.next`, use `npm run build:i
 - `GET /api/session/:id`
 - `POST /api/session/:id/revert`
 - `POST /api/diagram/import`
+- `POST /api/diagram/import-image`
 - `POST /api/diagram/generate`
 - `POST /api/diagram/edit`
 - `POST /api/diagram/direct-edit`
 - `POST /api/image/generate`
 - `POST /api/image/edit`
 - `POST /api/upload`
+- `GET /api/health`
 - `GET /api/artifact/:id`
 - `GET /api/download/:id`
 - `GET /api/traces/:sessionId`
@@ -224,13 +232,15 @@ The test suite covers:
 - OpenAI wrapper response validation and safe structured parsing
 - trace creation
 - Draw.io XML import, repair, and round-trip behavior
+- Draw.io group-relative geometry and imported edge waypoint preservation
 - deterministic diagram layout and connector routing
 - Mermaid-to-structured-diagram import
+- reference-image-to-editable-diagram workflow orchestration
 - direct diagram edit operations
 - backend route flows for session, diagram, image, upload, artifact, and traces
 - image mask coordinate normalization
 - mask brush settings and localized edit request metadata
-- frontend image edit request shaping
+- frontend image edit request shaping and prompt sanitization
 - session history and revert metadata behavior
 
 Quality gates:
@@ -262,8 +272,8 @@ Benchmark-oriented fixtures live in `benchmarks/fixtures/`:
 
 ## Known Limitations
 
-- The diagram canvas supports practical interactive edits, optimized layout, deterministic layout modes, edge routing, manual zoom, scroll, explicit fit-to-view, direct XML export, and cleaner user-facing recovery. It is still intentionally lighter than diagrams.net for advanced power-user operations such as custom libraries, plugin-backed shape registries, and full keyboard command parity.
-- Draw.io XML compatibility now preserves common structure plus many raw `mxCell` attributes during round-trip. Very exotic diagrams.net features such as plugin payloads, embedded libraries, or custom shape registries may still require repair or targeted compatibility work.
+- The diagram canvas supports practical interactive edits, optimized layout, deterministic layout modes, edge routing, imported waypoints, manual zoom, scroll, explicit fit-to-view, source inspection, direct XML export, and cleaner user-facing recovery. It is still intentionally lighter than diagrams.net for advanced power-user operations such as custom libraries, plugin-backed shape registries, and full keyboard command parity.
+- Draw.io XML compatibility now preserves common structure, group-relative geometry, imported edge waypoints, and many raw `mxCell` attributes during round-trip. Very exotic diagrams.net features such as plugin payloads, embedded libraries, custom shape registries, advanced label geometries, or plugin-owned metadata may still require repair or targeted compatibility work.
 - Mermaid import covers the diagram families most relevant to this prototype: flowchart/graph, sequence, class, and state-style edge/node declarations. Advanced Mermaid directives, themes, notes, and plugin-specific syntax are ignored or preserved only through the generated structured representation.
 - OpenAI image generation/editing depends on account model access and provider-side latency.
 - Gemini mask-guided editing uses the source image plus exported mask as multimodal guidance because Gemini does not use the same native alpha-mask inpainting parameter as OpenAI. It is supported, but OpenAI remains the stricter option for pixel-protected localized edits.

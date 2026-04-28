@@ -1,5 +1,12 @@
 # Diagram Feature
 
-Phase 1 reserves this feature boundary for diagram import, rendering, direct editing, and prompt-guided editing.
+This feature boundary contains the browser-side editable diagram workspace. It supports:
 
-Phase 2 should add route-facing orchestration that composes XML parsing, OpenAI intent/planning calls, deterministic model updates, validation, artifact persistence, and session versioning.
+- Prompt-generated diagrams backed by structured `DiagramModel` state.
+- Draw.io / diagrams.net XML import and export.
+- Mermaid source import.
+- Reference-image reconstruction through `POST /api/diagram/import-image`.
+- Direct canvas edits for nodes, labels, styles, connectors, resizing, movement, grouping state, layout, zoom, and history undo/redo.
+- `Edit` and `Source` views so users can inspect the underlying Draw.io-compatible XML or imported Mermaid source.
+
+Route-facing orchestration lives in `lib/workflows/diagram.ts`; deterministic XML and model helpers live under `lib/xml` and `lib/diagram`.

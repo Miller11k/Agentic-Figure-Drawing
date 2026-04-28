@@ -321,17 +321,9 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
       const imageBase64 = imageElementToPngDataUrl(imageElement);
       const maskBase64 = canvasRef.current ? exportOpenAIMask(canvasRef.current, featherRadius) : undefined;
 
-      const localizedPrompt = maskBase64
-        ? [
-            prompt,
-            "Strict localized edit constraint: only change pixels inside the transparent mask area.",
-            "Preserve all unmasked / opaque-mask regions exactly, including background, lighting, colors, texture, and composition."
-          ].join("\n")
-        : prompt;
-
       return editImage(
         sessionId,
-        localizedPrompt,
+        prompt.trim(),
         imageBase64,
         maskBase64,
         parentVersionId,

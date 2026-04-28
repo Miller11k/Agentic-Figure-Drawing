@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { artifactDownloadUrl } from "../features/session/api";
+import { sanitizeHistoryPrompt } from "../features/session/prompts";
 import { useEditorStore } from "../features/session/store";
 
 describe("frontend session state", () => {
@@ -32,5 +33,17 @@ describe("frontend session state", () => {
     useEditorStore.getState().clearWorkspace();
 
     expect(useEditorStore.getState().imageProvider).toBe("openai");
+  });
+
+  it("removes internal localization instructions from history prompts", () => {
+    expect(
+      sanitizeHistoryPrompt(
+        [
+          "Make the logo blue.",
+          "Strict localized edit constraint: only change pixels inside the transparent mask area.",
+          "Preserve all unmasked / opaque-mask regions exactly, including background."
+        ].join("\n")
+      )
+    ).toBe("Make the logo blue.");
   });
 });

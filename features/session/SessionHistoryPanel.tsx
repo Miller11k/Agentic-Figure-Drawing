@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createSession, revertSession } from "./api";
 import { selectVersionArtifact } from "./artifacts";
+import { sanitizeHistoryPrompt } from "./prompts";
 import { useEditorStore } from "./store";
 import type { SessionHistoryResponse } from "./types";
 import { Pill } from "@/components/ui";
@@ -34,7 +35,7 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
     setMode(step.mode);
     setActiveVersion(versionId);
     setActiveArtifact(artifact?.id);
-    setPrompt(step.prompt ?? "");
+    setPrompt(sanitizeHistoryPrompt(step.prompt));
 
     if (step.mode === "diagram") {
       setDiagramState(step.diagramModel ?? undefined, undefined);
@@ -52,6 +53,13 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
       await queryClient.invalidateQueries({ queryKey: ["session", activeSessionId] });
     }
   });
+
+  const restoreAndRevertVersion = (versionId: string) => {
+    restoreVersion(versionId);
+    if (versionId !== activeVersionId && activeSessionId) {
+      revertMutation.mutate(versionId);
+    }
+  };
   const resetHistoryMutation = useMutation({
     mutationFn: () => createSession("Editing session", mode),
     onSuccess: async (result) => {
@@ -100,11 +108,11 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
                   ? "border-blue-200 bg-blue-50/70"
                   : "border-slate-200/70 bg-white/68 hover:bg-white"
             }`}
-            onClick={() => restoreVersion(step.versionId)}
+            onClick={() => restoreAndRevertVersion(step.versionId)}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                restoreVersion(step.versionId);
+                restoreAndRevertVersion(step.versionId);
               }
             }}
           >
@@ -118,22 +126,14 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
                 <Pill>{step.mode}</Pill>
               </div>
             </div>
-            {step.prompt ? <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-600">{step.prompt}</p> : null}
+            {sanitizeHistoryPrompt(step.prompt) ? (
+              <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-600">
+                {sanitizeHistoryPrompt(step.prompt)}
+              </p>
+            ) : null}
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className="truncate font-mono text-[10px] text-slate-400">{step.versionId}</span>
-              {!isActive ? (
-                <button
-                  className="inline-flex h-8 shrink-0 items-center rounded-full border border-slate-200 bg-white/70 px-3 text-xs font-semibold text-slate-700"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    restoreVersion(step.versionId);
-                    revertMutation.mutate(step.versionId);
-                  }}
-                  type="button"
-                >
-                  Reopen
-                </button>
-              ) : null}
+              {!isActive ? <span className="text-xs font-semibold text-slate-500">Click to restore</span> : null}
             </div>
           </div>
         );

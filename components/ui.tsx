@@ -8,7 +8,7 @@ export function Panel({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cx(
-        "rounded-[28px] border border-white/70 bg-white/78 shadow-[0_24px_80px_rgba(15,23,42,0.10)] backdrop-blur-2xl",
+        "rounded-[24px] border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-2xl",
         className
       )}
       {...props}
@@ -17,7 +17,7 @@ export function Panel({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
 }
 
 export function Section({ className, ...props }: HTMLAttributes<HTMLElement>) {
-  return <section className={cx("rounded-3xl border border-slate-200/70 bg-white/68 p-4 shadow-sm", className)} {...props} />;
+  return <section className={cx("rounded-[20px] border border-slate-200/70 bg-white/70 p-4 shadow-sm", className)} {...props} />;
 }
 
 export function SectionTitle({ eyebrow, title }: { eyebrow?: string; title: string }) {
@@ -39,9 +39,9 @@ export function Button({
       className={cx(
         "inline-flex h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold transition duration-200 ease-out disabled:pointer-events-none disabled:opacity-45",
         variant === "primary" &&
-          "bg-slate-950 text-white shadow-[0_12px_30px_rgba(15,23,42,0.22)] hover:-translate-y-0.5 hover:bg-slate-800",
+          "bg-slate-950 text-white shadow-[0_10px_26px_rgba(15,23,42,0.18)] hover:bg-slate-800",
         variant === "secondary" &&
-          "border border-slate-200/80 bg-white/72 text-slate-800 shadow-sm hover:-translate-y-0.5 hover:bg-white",
+          "border border-slate-200/80 bg-white/76 text-slate-800 shadow-sm hover:bg-white",
         variant === "ghost" && "text-slate-600 hover:bg-slate-100/80 hover:text-slate-950",
         variant === "danger" && "border border-red-200 bg-white text-red-700 hover:bg-red-50",
         className
@@ -59,7 +59,7 @@ export function TextArea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   return (
     <textarea
       className={cx(
-        "w-full resize-none rounded-3xl border border-slate-200/80 bg-white/70 p-4 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:shadow-[0_0_0_4px_rgba(148,163,184,0.16)]",
+        "w-full resize-none rounded-[20px] border border-slate-200/80 bg-white/74 p-4 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:shadow-[0_0_0_4px_rgba(148,163,184,0.16)]",
         className
       )}
       {...props}

@@ -110,7 +110,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setActiveVersion(result.versionId);
       setActiveArtifact(result.artifactId);
       setDiagramState(result.diagramModel, result.xml);
-      invalidate(activeSessionId);
+      invalidate(result.sessionId);
     },
     onError: (err) => setError((err as Error).message)
   });
@@ -256,33 +256,37 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
 
   return (
     <Panel className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <div className="rounded-[24px] bg-slate-950 p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.20)]">
-        <div className="mb-7 flex items-center justify-between">
-          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/12 text-lg" aria-hidden="true">
-            *
-          </span>
-          <Pill className="border-white/15 bg-white/10 text-white/80">{mode}</Pill>
+      <div className="rounded-[22px] border border-white/70 bg-white/72 p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
+            <p className="mt-1 truncate text-base font-semibold tracking-tight text-slate-950">
+              {mode === "diagram" ? "Diagram Studio" : "Image Studio"}
+            </p>
+          </div>
+          <Pill className="capitalize">{activeSessionId ? "Saved" : "New"}</Pill>
         </div>
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/48">OpenAI-native editor</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-white">Stateful workspace</h1>
+        {history?.title ? <p className="mt-3 truncate text-sm text-slate-500">{history.title}</p> : null}
       </div>
 
-      <Button variant="primary" onClick={clearWorkspace} disabled={busy || !hasActiveContent}>
-        Clear workspace
-      </Button>
-
-      <SegmentedControl<EditorMode>
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: "diagram", label: "Diagram" },
-          { value: "image", label: "Image" }
-        ]}
-      />
-
-      <Button className="w-full" variant="secondary" onClick={() => setShowHistory(!showHistory)}>
-        {showHistory ? "Hide history" : "Show history"}
-      </Button>
+      <Section className="space-y-3">
+        <SegmentedControl<EditorMode>
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "diagram", label: "Diagram" },
+            { value: "image", label: "Image" }
+          ]}
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <Button className="w-full" variant="secondary" onClick={() => setShowHistory(!showHistory)}>
+            {showHistory ? "Hide history" : "History"}
+          </Button>
+          <Button className="w-full" variant="ghost" onClick={clearWorkspace} disabled={busy || !hasActiveContent}>
+            Clear
+          </Button>
+        </div>
+      </Section>
 
       {mode === "diagram" ? (
         <>
@@ -315,6 +319,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
               accept=".drawio,.xml,.mmd,.mermaid,.md,image/png,image/jpeg,image/webp"
               className="hidden"
               onChange={async (event) => {
+                const input = event.currentTarget;
                 const file = event.target.files?.[0];
                 if (file?.type.startsWith("image/")) {
                   importImageDiagramMutation.mutate({
@@ -325,7 +330,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
                 } else if (file) {
                   importMutation.mutate({ content: await readFileAsText(file), fileName: file.name });
                 }
-                event.currentTarget.value = "";
+                input.value = "";
               }}
             />
           </Section>
@@ -391,6 +396,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
               accept="image/png,image/jpeg,image/webp"
               className="hidden"
               onChange={async (event) => {
+                const input = event.currentTarget;
                 const file = event.target.files?.[0];
                 if (file) {
                   const dataUrl = await readFileAsDataUrl(file);
@@ -400,7 +406,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
                     mimeType: file.type || "image/png"
                   });
                 }
-                event.currentTarget.value = "";
+                input.value = "";
               }}
             />
           </Section>

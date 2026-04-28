@@ -4,6 +4,7 @@ import { useEditorStore } from "../features/session/store";
 
 describe("frontend session state", () => {
   it("tracks the active session, mode, and artifact", () => {
+    useEditorStore.getState().clearWorkspace();
     useEditorStore.getState().setMode("image");
     useEditorStore.getState().setActiveSession("session_1", "version_1");
     useEditorStore.getState().setActiveArtifact("artifact_1");
@@ -19,10 +20,17 @@ describe("frontend session state", () => {
   });
 
   it("tracks selected diagram elements and pending edge source", () => {
+    useEditorStore.getState().clearWorkspace();
     useEditorStore.getState().selectElement({ type: "node", id: "node_a" });
     useEditorStore.getState().setPendingEdgeSource("node_a");
 
     expect(useEditorStore.getState().selectedElement).toEqual({ type: "node", id: "node_a" });
     expect(useEditorStore.getState().pendingEdgeSourceId).toBe("node_a");
+  });
+
+  it("uses OpenAI as the safe default image provider", () => {
+    useEditorStore.getState().clearWorkspace();
+
+    expect(useEditorStore.getState().imageProvider).toBe("openai");
   });
 });

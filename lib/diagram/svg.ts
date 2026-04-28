@@ -41,6 +41,15 @@ function styleColor(style: Record<string, unknown>, key: "fillColor" | "strokeCo
   return fallback;
 }
 
+function styleValue(style: Record<string, unknown>, key: string): string | undefined {
+  if (typeof style[key] === "string") return style[key] as string;
+  if (typeof style.raw === "string") {
+    const match = style.raw.match(new RegExp(`${key}=([^;]+)`));
+    return match?.[1];
+  }
+  return undefined;
+}
+
 function styleShape(style: Record<string, unknown>, fallback = "rounded") {
   if (typeof style.shape === "string") return style.shape;
   if (typeof style.raw === "string") {
@@ -121,6 +130,36 @@ function nodeSvg(box: BoundingBox, fill: string, stroke: string, shape: string) 
   return `<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="14" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
 }
 
+function edgeRouteFromModel(
+  edge: DiagramModel["edges"][number],
+  source: BoundingBox,
+  target: BoundingBox
+) {
+  const geometry = (edge.data?.mxCell as { geometry?: { points?: Array<{ x: number; y: number; as?: string }> } } | undefined)?.geometry;
+  const waypoints = geometry?.points?.filter((point) => point.as !== "sourcePoint" && point.as !== "targetPoint") ?? [];
+
+  if (waypoints.length === 0) {
+    return routeOrthogonalEdge(source, target);
+  }
+
+  const points = [
+    { x: source.x + source.width, y: source.y + source.height / 2 },
+    ...waypoints.map((point) => ({ x: point.x, y: point.y })),
+    { x: target.x, y: target.y + target.height / 2 }
+  ];
+  const labelIndex = Math.max(1, Math.floor(points.length / 2));
+  const before = points[labelIndex - 1];
+  const after = points[labelIndex];
+
+  return {
+    points,
+    labelPoint: {
+      x: (before.x + after.x) / 2,
+      y: (before.y + after.y) / 2
+    }
+  };
+}
+
 export function createDiagramSvgFromModel(model: DiagramModel): string {
   const bounds = boundsFor(model);
   const nodeById = new Map(model.nodes.map((node) => [node.id, node]));
@@ -136,12 +175,18 @@ export function createDiagramSvgFromModel(model: DiagramModel): string {
       const source = nodeById.get(edge.sourceId)?.boundingBox;
       const target = nodeById.get(edge.targetId)?.boundingBox;
       if (!source || !target) return "";
-      const route = routeOrthogonalEdge(source, target);
+      const route = edgeRouteFromModel(edge, source, target);
+      const stroke = styleColor(edge.style, "strokeColor", "#334155");
+      const dashed =
+        edge.style.dashed === true ||
+        edge.style.dashed === "1" ||
+        (typeof edge.style.raw === "string" && edge.style.raw.includes("dashed=1"));
+      const endArrow = styleValue(edge.style, "endArrow");
       const labelWidth = edge.label ? Math.max(56, Math.min(220, edge.label.length * 7 + 20)) : 0;
       const label = edge.label
         ? `<rect x="${route.labelPoint.x - labelWidth / 2}" y="${route.labelPoint.y - 17}" width="${labelWidth}" height="22" rx="8" fill="#ffffff" stroke="#e2e8f0" opacity="0.96"/><text x="${route.labelPoint.x}" y="${route.labelPoint.y - 2}" text-anchor="middle" fill="#475569" font-size="12" font-weight="600" font-family="Arial">${escapeHtml(edge.label)}</text>`
         : "";
-      return `<g><path d="${pointsToSvgPath(route.points)}" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>${label}</g>`;
+      return `<g><path d="${pointsToSvgPath(route.points)}" fill="none" stroke="${stroke}" stroke-width="2"${dashed ? ' stroke-dasharray="8 6"' : ""}${endArrow === "none" ? "" : ' marker-end="url(#arrow)"'}/>${label}</g>`;
     })
     .join("");
   const nodes = model.nodes

@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createSession, revertSession } from "./api";
+import { selectVersionArtifact } from "./artifacts";
 import { useEditorStore } from "./store";
 import type { SessionHistoryResponse } from "./types";
 import { Pill } from "@/components/ui";
@@ -14,6 +15,7 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
     selectedVersionId,
     mode,
     selectVersion,
+    setMode,
     setActiveSession,
     setActiveVersion,
     setActiveArtifact,
@@ -21,6 +23,28 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
     setActiveImageDataUrl,
     setPrompt
   } = useEditorStore();
+
+  const restoreVersion = (versionId: string) => {
+    if (!history) return;
+    const step = history.steps.find((candidate) => candidate.versionId === versionId);
+    if (!step) return;
+    const artifact = selectVersionArtifact(history, versionId, step.mode);
+
+    selectVersion(versionId);
+    setMode(step.mode);
+    setActiveVersion(versionId);
+    setActiveArtifact(artifact?.id);
+    setPrompt(step.prompt ?? "");
+
+    if (step.mode === "diagram") {
+      setDiagramState(step.diagramModel ?? undefined, undefined);
+      setActiveImageDataUrl(undefined);
+    } else {
+      setDiagramState(undefined, undefined);
+      setActiveImageDataUrl(undefined);
+    }
+  };
+
   const revertMutation = useMutation({
     mutationFn: (versionId: string) => revertSession(activeSessionId!, versionId),
     onSuccess: async (result) => {
@@ -65,8 +89,10 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
         const isActive = step.versionId === activeVersionId;
         const isSelected = step.versionId === selectedVersionId;
         return (
-          <button
+          <div
             key={step.versionId}
+            role="button"
+            tabIndex={0}
             className={`w-full rounded-3xl border p-4 text-left text-sm shadow-sm transition hover:-translate-y-0.5 ${
               isSelected
                 ? "border-slate-900 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.10)]"
@@ -74,7 +100,13 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
                   ? "border-blue-200 bg-blue-50/70"
                   : "border-slate-200/70 bg-white/68 hover:bg-white"
             }`}
-            onClick={() => selectVersion(step.versionId)}
+            onClick={() => restoreVersion(step.versionId)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                restoreVersion(step.versionId);
+              }
+            }}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -90,18 +122,20 @@ export function SessionHistoryPanel({ history }: { history?: SessionHistoryRespo
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className="truncate font-mono text-[10px] text-slate-400">{step.versionId}</span>
               {!isActive ? (
-              <span
-                className="inline-flex h-8 shrink-0 items-center rounded-full border border-slate-200 bg-white/70 px-3 text-xs font-semibold text-slate-700"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  revertMutation.mutate(step.versionId);
-                }}
-              >
-                Revert
-              </span>
+                <button
+                  className="inline-flex h-8 shrink-0 items-center rounded-full border border-slate-200 bg-white/70 px-3 text-xs font-semibold text-slate-700"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    restoreVersion(step.versionId);
+                    revertMutation.mutate(step.versionId);
+                  }}
+                  type="button"
+                >
+                  Reopen
+                </button>
               ) : null}
             </div>
-          </button>
+          </div>
         );
       })}
       {revertMutation.isError ? (

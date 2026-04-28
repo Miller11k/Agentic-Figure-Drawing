@@ -19,6 +19,7 @@ interface MxGeometry {
   height?: number;
   relative?: string;
   as?: string;
+  points?: Array<{ x: number; y: number; as?: string }>;
 }
 
 interface MxCell {
@@ -196,6 +197,16 @@ function parseMxCells(xml: string): MxCell[] {
     const body = match[2] ?? "";
     const geometryMatch = body.match(/<mxGeometry\b([^>]*?)(?:\/>|>[\s\S]*?<\/mxGeometry>)/);
     const geometryAttributes = geometryMatch ? parseAttributes(geometryMatch[1]) : undefined;
+    const geometryBody = geometryMatch?.[0] ?? "";
+    const points: Array<{ x: number; y: number; as?: string }> = Array.from(geometryBody.matchAll(/<mxPoint\b([^>]*?)\/>/g))
+      .map((pointMatch): { x: number; y: number; as?: string } | undefined => {
+        const attributes = parseAttributes(pointMatch[1]);
+        const x = numberFromAttribute(attributes.x);
+        const y = numberFromAttribute(attributes.y);
+
+        return x !== undefined && y !== undefined ? { x, y, as: attributes.as } : undefined;
+      })
+      .filter((point): point is { x: number; y: number; as?: string } => Boolean(point));
 
     cells.push({
       id: attributes.id,
@@ -213,7 +224,8 @@ function parseMxCells(xml: string): MxCell[] {
             width: numberFromAttribute(geometryAttributes.width),
             height: numberFromAttribute(geometryAttributes.height),
             relative: geometryAttributes.relative,
-            as: geometryAttributes.as
+            as: geometryAttributes.as,
+            points
           }
         : undefined,
       rawAttributes: attributes
@@ -226,6 +238,26 @@ function parseMxCells(xml: string): MxCell[] {
 function getDiagramName(xml: string): string | undefined {
   const match = xml.match(/<diagram\b([^>]*)>/);
   return match ? parseAttributes(match[1]).name : undefined;
+}
+
+function absoluteBox(box: BoundingBox | undefined, parentBox: BoundingBox | undefined): BoundingBox | undefined {
+  if (!box || !parentBox) return box;
+
+  return {
+    ...box,
+    x: box.x + parentBox.x,
+    y: box.y + parentBox.y
+  };
+}
+
+function relativeBox(box: BoundingBox | undefined, parentBox: BoundingBox | undefined): BoundingBox | undefined {
+  if (!box || !parentBox) return box;
+
+  return {
+    ...box,
+    x: box.x - parentBox.x,
+    y: box.y - parentBox.y
+  };
 }
 
 export function validateDrawioXmlShape(xml: string): XmlValidationResult {
@@ -353,6 +385,11 @@ export function parseDrawioXmlToDiagramModel(xml: string): DiagramModel {
   const groupIds = new Set(
     cells.filter((cell) => isGroupCell(cell, childParentIds)).map((cell) => cell.id)
   );
+  const groupBoxById = new Map(
+    cells
+      .filter((cell) => groupIds.has(cell.id))
+      .map((cell) => [cell.id, boundingBoxFromGeometry(cell.geometry)])
+  );
 
   const groups: DiagramGroupModel[] = cells
     .filter((cell) => groupIds.has(cell.id))
@@ -377,12 +414,16 @@ export function parseDrawioXmlToDiagramModel(xml: string): DiagramModel {
       stableId: cell.id,
       label: cell.value ?? "",
       groupId: cell.parent && groupIds.has(cell.parent) ? cell.parent : undefined,
-      boundingBox: boundingBoxFromGeometry(cell.geometry),
+      boundingBox: absoluteBox(
+        boundingBoxFromGeometry(cell.geometry),
+        cell.parent && groupIds.has(cell.parent) ? groupBoxById.get(cell.parent) : undefined
+      ),
       style: styleToRecord(cell.style),
       data: {
         mxCell: {
           parent: cell.parent,
-          rawAttributes: cell.rawAttributes
+          rawAttributes: cell.rawAttributes,
+          geometry: cell.geometry
         }
       }
     }));
@@ -453,6 +494,28 @@ function serializeGeometry(geometry: BoundingBox | undefined, edge = false): str
   })}/>`;
 }
 
+function serializeEdgeGeometry(edge: DiagramEdgeModel): string {
+  const geometry = (edge.data?.mxCell as { geometry?: MxGeometry } | undefined)?.geometry;
+  const points = geometry?.points?.filter((point) => point.as !== "sourcePoint" && point.as !== "targetPoint") ?? [];
+  const sourcePoint = geometry?.points?.find((point) => point.as === "sourcePoint");
+  const targetPoint = geometry?.points?.find((point) => point.as === "targetPoint");
+
+  if (points.length === 0 && !sourcePoint && !targetPoint) {
+    return '<mxGeometry relative="1" as="geometry"/>';
+  }
+
+  const source = sourcePoint ? `<mxPoint ${serializeAttributes({ x: sourcePoint.x, y: sourcePoint.y, as: "sourcePoint" })}/>` : "";
+  const target = targetPoint ? `<mxPoint ${serializeAttributes({ x: targetPoint.x, y: targetPoint.y, as: "targetPoint" })}/>` : "";
+  const array =
+    points.length > 0
+      ? `<Array as="points">${points
+          .map((point) => `<mxPoint ${serializeAttributes({ x: point.x, y: point.y })}/>`)
+          .join("")}</Array>`
+      : "";
+
+  return `<mxGeometry relative="1" as="geometry">${source}${target}${array}</mxGeometry>`;
+}
+
 function serializeGroup(group: DiagramGroupModel): string {
   const attributes = serializeAttributes(mergeMxCellAttributes(mxCellAttributesFromStyle(group.style), {
     id: group.id,
@@ -465,8 +528,9 @@ function serializeGroup(group: DiagramGroupModel): string {
   return `<mxCell ${attributes}>${serializeGeometry(group.boundingBox)}</mxCell>`;
 }
 
-function serializeNode(node: DiagramNodeModel): string {
+function serializeNode(node: DiagramNodeModel, groupBoxes: Map<string, BoundingBox | undefined>): string {
   const parent = node.groupId ?? "1";
+  const geometry = node.groupId ? relativeBox(node.boundingBox, groupBoxes.get(node.groupId)) : node.boundingBox;
   const attributes = serializeAttributes(mergeMxCellAttributes(mxCellAttributesFromData(node.data), {
     id: node.id,
     value: node.label,
@@ -475,7 +539,7 @@ function serializeNode(node: DiagramNodeModel): string {
     parent
   }));
 
-  return `<mxCell ${attributes}>${serializeGeometry(node.boundingBox)}</mxCell>`;
+  return `<mxCell ${attributes}>${serializeGeometry(geometry)}</mxCell>`;
 }
 
 function serializeEdge(edge: DiagramEdgeModel): string {
@@ -489,17 +553,18 @@ function serializeEdge(edge: DiagramEdgeModel): string {
     target: edge.targetId
   }));
 
-  return `<mxCell ${attributes}>${serializeGeometry(undefined, true)}</mxCell>`;
+  return `<mxCell ${attributes}>${serializeEdgeGeometry(edge)}</mxCell>`;
 }
 
 export function createDrawioXmlFromModel(model: DiagramModel): string {
   const diagramName =
     typeof model.layoutMetadata.diagramName === "string" ? model.layoutMetadata.diagramName : "Diagram";
+  const groupBoxes = new Map(model.groups.map((group) => [group.id, group.boundingBox]));
   const cells = [
     '<mxCell id="0"/>',
     '<mxCell id="1" parent="0"/>',
     ...model.groups.map(serializeGroup),
-    ...model.nodes.map(serializeNode),
+    ...model.nodes.map((node) => serializeNode(node, groupBoxes)),
     ...model.edges.map(serializeEdge)
   ];
 

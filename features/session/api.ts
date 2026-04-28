@@ -64,6 +64,20 @@ export function importDiagram(sessionId: string, xml: string, fileName: string, 
   });
 }
 
+export function importDiagramImage(input: {
+  sessionId: string;
+  imageBase64: string;
+  prompt?: string;
+  fileName?: string;
+  mimeType?: string;
+  parentVersionId?: string | null;
+}) {
+  return requestJson<DiagramImportResult>("/api/diagram/import-image", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
 export function generateDiagram(
   sessionId: string,
   prompt: string,

@@ -30,6 +30,9 @@ function blobToDataUrl(blob: Blob) {
 
 async function artifactToDataUrl(artifactId: string) {
   const response = await fetch(artifactDownloadUrl(artifactId));
+  if (!response.ok) {
+    throw new Error(`Could not load image artifact (${response.status}).`);
+  }
   const blob = await response.blob();
   return blobToDataUrl(blob);
 }
@@ -206,10 +209,14 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
     setImageLoading(true);
     artifactToDataUrl(artifactId)
       .then((dataUrl) => {
+        setError(null);
         setActiveImageDataUrl(dataUrl);
         setLoadedArtifactId(artifactId);
       })
-      .catch(() => setImageLoading(false));
+      .catch((err) => {
+        setError((err as Error).message);
+        setImageLoading(false);
+      });
   }, [artifactId, loadedArtifactId, setActiveImageDataUrl]);
 
   useEffect(() => {
@@ -358,6 +365,7 @@ export function ImageWorkspace({ artifactId }: { artifactId?: string }) {
 
   const beginDraw = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || imageSize.width === 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     snapshotMask();
     const point = normalizeCanvasPoint(event.clientX, event.clientY, canvasRef.current.getBoundingClientRect(), imageSize);
     setDrawing(true);

@@ -41,6 +41,7 @@ const MIN_NODE_WIDTH = 64;
 const MIN_NODE_HEIGHT = 42;
 type CanvasTool = "select" | "pan" | "connect";
 type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+type DiagramViewMode = "edit" | "source";
 
 function boundsFor(model: DiagramModel) {
   const boxes = model.nodes.map((node) => node.boundingBox).filter(Boolean);
@@ -77,6 +78,15 @@ function styleColor(style: Record<string, unknown>, key: "fillColor" | "strokeCo
   return fallback;
 }
 
+function styleValue(style: Record<string, unknown>, key: string): string | undefined {
+  if (typeof style[key] === "string") return style[key] as string;
+  if (typeof style.raw === "string") {
+    const match = style.raw.match(new RegExp(`${key}=([^;]+)`));
+    return match?.[1];
+  }
+  return undefined;
+}
+
 function styleShape(style: Record<string, unknown>, fallback = "rounded") {
   if (typeof style.shape === "string") return style.shape;
   if (typeof style.raw === "string") {
@@ -102,6 +112,32 @@ function styleShape(style: Record<string, unknown>, fallback = "rounded") {
   }
   if (typeof style.raw === "string" && style.raw.startsWith("ellipse;")) return "ellipse";
   return fallback;
+}
+
+function edgeRouteFromModel(edge: DiagramEdgeModel, source: BoundingBox, target: BoundingBox) {
+  const geometry = (edge.data?.mxCell as { geometry?: { points?: Array<{ x: number; y: number; as?: string }> } } | undefined)?.geometry;
+  const waypoints = geometry?.points?.filter((point) => point.as !== "sourcePoint" && point.as !== "targetPoint") ?? [];
+
+  if (waypoints.length === 0) {
+    return routeOrthogonalEdge(source, target);
+  }
+
+  const points = [
+    { x: source.x + source.width, y: source.y + source.height / 2 },
+    ...waypoints.map((point) => ({ x: point.x, y: point.y })),
+    { x: target.x, y: target.y + target.height / 2 }
+  ];
+  const labelIndex = Math.max(1, Math.floor(points.length / 2));
+  const before = points[labelIndex - 1];
+  const after = points[labelIndex];
+
+  return {
+    points,
+    labelPoint: {
+      x: (before.x + after.x) / 2,
+      y: (before.y + after.y) / 2
+    }
+  };
 }
 
 function styleIcon(node: DiagramNodeModel) {
@@ -183,12 +219,14 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
   const [editingLabel, setEditingLabel] = useState<{ type: "node" | "edge"; id: string } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [tool, setTool] = useState<CanvasTool>("select");
+  const [viewMode, setViewMode] = useState<DiagramViewMode>("edit");
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [pendingEdgeStyle, setPendingEdgeStyle] = useState<Record<string, unknown> | undefined>();
   const [panDrag, setPanDrag] = useState<{ x: number; y: number; left: number; top: number } | null>(null);
   const {
     activeSessionId,
     activeVersionId,
+    activeXml,
     selectedElement,
     pendingEdgeSourceId,
     setActiveVersion,
@@ -199,6 +237,12 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
   } = useEditorStore();
 
   const model = draftModel ?? diagramModel;
+  const sourceText = useMemo(() => {
+    if (!model) return "";
+    return model.normalized?.format === "mermaid"
+      ? model.sourceXml ?? activeXml ?? createDrawioXmlFromModel(model)
+      : activeXml ?? model.sourceXml ?? createDrawioXmlFromModel(model);
+  }, [activeXml, model]);
 
   const directEditMutation = useMutation({
     mutationFn: async (input: { baseModel: DiagramModel; operations: DirectDiagramEditOperation[] }) => {
@@ -617,6 +661,18 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
     <div className="flex h-full min-h-[520px] flex-col overflow-hidden rounded-[32px] border border-white/70 bg-white/70 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 bg-white/58 p-3">
         <div className="flex h-10 overflow-hidden rounded-full border border-slate-200 bg-slate-100/80 p-1 text-sm">
+          {(["edit", "source"] as const).map((item) => (
+            <button
+              key={item}
+              className={`rounded-full px-3 capitalize transition ${viewMode === item ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900"}`}
+              onClick={() => setViewMode(item)}
+              type="button"
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className="flex h-10 overflow-hidden rounded-full border border-slate-200 bg-slate-100/80 p-1 text-sm">
           {(["select", "pan", "connect"] as const).map((item) => (
             <button
               key={item}
@@ -808,15 +864,25 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
         </div>
       )}
 
-      <div
-        ref={viewportRef}
-        className={`min-h-0 flex-1 overflow-auto bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.74))] ${tool === "pan" ? "cursor-grab" : ""}`}
-        onWheel={handleWheel}
-        onPointerDown={handleViewportPointerDown}
-        onPointerMove={handleViewportPointerMove}
-        onPointerUp={handleViewportPointerUp}
-        onPointerLeave={handleViewportPointerUp}
-      >
+      {viewMode === "source" ? (
+        <div className="min-h-0 flex-1 overflow-hidden bg-slate-950 p-4">
+          <textarea
+            className="h-full w-full resize-none rounded-2xl border border-white/10 bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100 outline-none"
+            readOnly
+            spellCheck={false}
+            value={sourceText}
+          />
+        </div>
+      ) : (
+        <div
+          ref={viewportRef}
+          className={`min-h-0 flex-1 overflow-auto bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.74))] ${tool === "pan" ? "cursor-grab" : ""}`}
+          onWheel={handleWheel}
+          onPointerDown={handleViewportPointerDown}
+          onPointerMove={handleViewportPointerMove}
+          onPointerUp={handleViewportPointerUp}
+          onPointerLeave={handleViewportPointerUp}
+        >
         <svg
           ref={svgRef}
           className="touch-none"
@@ -863,9 +929,10 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
             const source = nodeById.get(edge.sourceId)?.boundingBox;
             const target = nodeById.get(edge.targetId)?.boundingBox;
             if (!source || !target) return null;
-            const route = routeOrthogonalEdge(source, target);
+            const route = edgeRouteFromModel(edge, source, target);
             const selected = selectedElement?.type === "edge" && selectedElement.id === edge.id;
             const edgeStroke = styleColor(edge.style, "strokeColor", selected ? "#0f766e" : "#334155");
+            const endArrow = styleValue(edge.style, "endArrow");
             const dashed =
               edge.style.dashed === true ||
               edge.style.dashed === "1" ||
@@ -915,7 +982,7 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
                     editEdgeLabel();
                   }}
                 />
-                <path d={pointsToSvgPath(route.points)} fill="none" stroke={edgeStroke} strokeWidth={strokeWidth} strokeDasharray={dashed ? "8 6" : undefined} markerEnd="url(#arrow)" />
+                <path d={pointsToSvgPath(route.points)} fill="none" stroke={edgeStroke} strokeWidth={strokeWidth} strokeDasharray={dashed ? "8 6" : undefined} markerEnd={endArrow === "none" ? undefined : "url(#arrow)"} />
                 {showLabelEditor ? (
                   <foreignObject
                     x={route.labelPoint.x - labelWidth / 2}
@@ -1169,7 +1236,8 @@ export function DiagramWorkspace({ diagramModel, history }: { diagramModel?: Dia
             );
           })}
         </svg>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

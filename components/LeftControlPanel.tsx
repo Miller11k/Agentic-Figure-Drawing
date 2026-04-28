@@ -7,6 +7,7 @@ import {
   editDiagram,
   generateDiagram,
   generateImage,
+  importDiagramImage,
   importDiagram,
   uploadArtifact
 } from "@/features/session/api";
@@ -100,7 +101,8 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
   const importMutation = useMutation({
     mutationFn: async (input: { content: string; fileName: string }) => {
       const session = await ensureSession();
-      return importDiagram(session.sessionId, input.content, input.fileName, session.versionId);
+      const result = await importDiagram(session.sessionId, input.content, input.fileName, session.versionId);
+      return { ...result, sessionId: session.sessionId };
     },
     onSuccess: (result) => {
       setError(null);
@@ -109,6 +111,30 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setActiveArtifact(result.artifactId);
       setDiagramState(result.diagramModel, result.xml);
       invalidate(activeSessionId);
+    },
+    onError: (err) => setError((err as Error).message)
+  });
+
+  const importImageDiagramMutation = useMutation({
+    mutationFn: async (input: { dataUrl: string; fileName: string; mimeType: string }) => {
+      const session = await ensureSession();
+      const result = await importDiagramImage({
+        sessionId: session.sessionId,
+        imageBase64: input.dataUrl,
+        prompt: prompt.trim() || undefined,
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+        parentVersionId: session.versionId
+      });
+      return { ...result, sessionId: session.sessionId };
+    },
+    onSuccess: (result) => {
+      setError(null);
+      setMode("diagram");
+      setActiveVersion(result.versionId);
+      setActiveArtifact(result.artifactId);
+      setDiagramState(result.diagramModel, result.xml);
+      invalidate(result.sessionId);
     },
     onError: (err) => setError((err as Error).message)
   });
@@ -120,7 +146,8 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     mutationFn: async () => {
       if (!prompt.trim()) throw new Error("Enter a prompt first.");
       const session = await ensureSession();
-      return generateDiagram(session.sessionId, prompt, session.versionId, imageProvider);
+      const result = await generateDiagram(session.sessionId, prompt, session.versionId, imageProvider);
+      return { ...result, sessionId: session.sessionId };
     },
     onSuccess: (result) => {
       setError(null);
@@ -128,7 +155,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setActiveVersion(result.versionId);
       setActiveArtifact(result.artifactId);
       setDiagramState(result.diagramModel, result.xml);
-      invalidate(activeSessionId);
+      invalidate(result.sessionId);
     },
     onError: (err) => setError((err as Error).message)
   });
@@ -138,7 +165,8 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       if (!activeDiagramModel || !currentDiagramXml) throw new Error("Load or generate a diagram before editing it.");
       if (!prompt.trim()) throw new Error("Enter an edit prompt first.");
       const session = await ensureSession();
-      return editDiagram(session.sessionId, prompt, activeDiagramModel, currentDiagramXml, session.versionId);
+      const result = await editDiagram(session.sessionId, prompt, activeDiagramModel, currentDiagramXml, session.versionId);
+      return { ...result, sessionId: session.sessionId };
     },
     onSuccess: (result) => {
       setError(null);
@@ -146,7 +174,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setActiveVersion(result.versionId);
       setActiveArtifact(result.artifactId);
       setDiagramState(result.diagramModel, result.xml);
-      invalidate(activeSessionId);
+      invalidate(result.sessionId);
     },
     onError: (err) => setError((err as Error).message)
   });
@@ -155,7 +183,8 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     mutationFn: async () => {
       if (!prompt.trim()) throw new Error("Enter a prompt first.");
       const session = await ensureSession();
-      return generateImage(session.sessionId, prompt, session.versionId, imageProvider);
+      const result = await generateImage(session.sessionId, prompt, session.versionId, imageProvider);
+      return { ...result, sessionId: session.sessionId };
     },
     onSuccess: (result) => {
       setError(null);
@@ -164,7 +193,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
       setActiveArtifact(result.artifactId);
       setDiagramState(undefined, undefined);
       setActiveImageDataUrl(undefined);
-      invalidate(activeSessionId);
+      invalidate(result.sessionId);
     },
     onError: (err) => setError((err as Error).message)
   });
@@ -219,6 +248,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
   const busy =
     createSessionMutation.isPending ||
     importMutation.isPending ||
+    importImageDiagramMutation.isPending ||
     generateDiagramMutation.isPending ||
     editDiagramMutation.isPending ||
     generateImageMutation.isPending ||
@@ -228,7 +258,9 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
     <Panel className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
       <div className="rounded-[24px] bg-slate-950 p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.20)]">
         <div className="mb-7 flex items-center justify-between">
-          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/12 text-lg">✦</span>
+          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/12 text-lg" aria-hidden="true">
+            *
+          </span>
           <Pill className="border-white/15 bg-white/10 text-white/80">{mode}</Pill>
         </div>
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/48">OpenAI-native editor</p>
@@ -273,18 +305,26 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
           </Section>
 
           <Section className="space-y-3">
-            <SectionTitle eyebrow="Import" title="Draw.io / Mermaid" />
+            <SectionTitle eyebrow="Import" title="Diagram source" />
             <Button className="w-full" disabled={busy} onClick={() => diagramFileInputRef.current?.click()}>
               Import file
             </Button>
             <input
               ref={diagramFileInputRef}
               type="file"
-              accept=".drawio,.xml,.mmd,.mermaid,.md"
+              accept=".drawio,.xml,.mmd,.mermaid,.md,image/png,image/jpeg,image/webp"
               className="hidden"
               onChange={async (event) => {
                 const file = event.target.files?.[0];
-                if (file) importMutation.mutate({ content: await readFileAsText(file), fileName: file.name });
+                if (file?.type.startsWith("image/")) {
+                  importImageDiagramMutation.mutate({
+                    dataUrl: await readFileAsDataUrl(file),
+                    fileName: file.name,
+                    mimeType: file.type || "image/png"
+                  });
+                } else if (file) {
+                  importMutation.mutate({ content: await readFileAsText(file), fileName: file.name });
+                }
                 event.currentTarget.value = "";
               }}
             />
@@ -372,7 +412,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
                 Download current image
               </a>
             ) : imageDownloadId ? (
-              <a className="flex h-10 items-center justify-center rounded-full border border-slate-200/80 bg-white/70 px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-white" href={`/api/download/${imageDownloadId}`}>
+              <a className="flex h-10 items-center justify-center rounded-full border border-slate-200/80 bg-white/70 px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-white" href={`/api/download/${imageDownloadId}`} download="image.png">
                 Download generated image
               </a>
             ) : (

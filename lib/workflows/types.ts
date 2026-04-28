@@ -36,6 +36,13 @@ export interface DiagramImportWorkflowInput extends WorkflowContext {
   fileName?: string;
 }
 
+export interface DiagramImageReconstructionWorkflowInput extends WorkflowContext {
+  image: Buffer;
+  prompt?: string;
+  mimeType?: string;
+  fileName?: string;
+}
+
 export interface DiagramImportWorkflowResult {
   versionId: string;
   diagramModel: DiagramModel;

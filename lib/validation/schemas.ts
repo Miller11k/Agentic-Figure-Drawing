@@ -240,6 +240,15 @@ export const diagramImportRequestSchema = z.object({
   parentVersionId: z.string().cuid().nullable().optional()
 });
 
+export const diagramImageImportRequestSchema = z.object({
+  sessionId: z.string().cuid(),
+  imageBase64: z.string().min(1),
+  prompt: z.string().optional(),
+  mimeType: z.string().min(1).optional(),
+  fileName: z.string().min(1).optional(),
+  parentVersionId: z.string().cuid().nullable().optional()
+});
+
 export const directDiagramEditOperationSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("rename-node"),

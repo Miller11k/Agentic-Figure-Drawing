@@ -28,7 +28,7 @@ describe("Draw.io XML pipeline", () => {
       label: "Backend",
       nodeIds: ["node_api_gateway", "node_auth_service"]
     });
-    expect(model.nodes[0].boundingBox).toEqual({ x: 90, y: 100, width: 150, height: 70 });
+    expect(model.nodes[0].boundingBox).toEqual({ x: 140, y: 140, width: 150, height: 70 });
   });
 
   it("round-trips imported XML through DiagramModel and preserves structure", () => {
@@ -53,6 +53,35 @@ describe("Draw.io XML pipeline", () => {
 
     expect(outputXml).toContain('connectable="0"');
     expect(outputXml).toContain('custom:data="kept"');
+  });
+
+  it("renders grouped Draw.io child geometry as absolute in the editor and relative on export", () => {
+    const xml =
+      '<mxfile><diagram name="Groups"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="group_a" value="Group" style="swimlane;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="200" y="120" width="320" height="220" as="geometry"/></mxCell><mxCell id="node_a" value="Inside" vertex="1" parent="group_a"><mxGeometry x="40" y="60" width="120" height="60" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>';
+    const model = parseDrawioXmlToDiagramModel(xml);
+    const node = model.nodes.find((candidate) => candidate.id === "node_a");
+
+    expect(node?.boundingBox).toEqual({ x: 240, y: 180, width: 120, height: 60 });
+
+    const outputXml = createDrawioXmlFromModel(model);
+    expect(outputXml).toContain('id="node_a"');
+    expect(outputXml).toContain('parent="group_a"');
+    expect(outputXml).toContain('x="40" y="60" width="120" height="60"');
+  });
+
+  it("preserves Draw.io edge waypoints for closer route fidelity", () => {
+    const xml =
+      '<mxfile><diagram name="Edges"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="a" value="A" vertex="1" parent="1"><mxGeometry x="20" y="20" width="120" height="60" as="geometry"/></mxCell><mxCell id="b" value="B" vertex="1" parent="1"><mxGeometry x="320" y="160" width="120" height="60" as="geometry"/></mxCell><mxCell id="e" value="via" edge="1" parent="1" source="a" target="b"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="220" y="50"/><mxPoint x="220" y="190"/></Array></mxGeometry></mxCell></root></mxGraphModel></diagram></mxfile>';
+    const model = parseDrawioXmlToDiagramModel(xml);
+    const edge = model.edges[0];
+
+    expect((edge.data.mxCell as { geometry?: { points?: Array<{ x: number; y: number }> } }).geometry?.points).toEqual([
+      { x: 220, y: 50, as: undefined },
+      { x: 220, y: 190, as: undefined }
+    ]);
+
+    const outputXml = createDrawioXmlFromModel(model);
+    expect(outputXml).toContain('<Array as="points"><mxPoint x="220" y="50"/><mxPoint x="220" y="190"/></Array>');
   });
 
   it("creates deterministic DiagramModel layout from DiagramSpec and serializes it", () => {

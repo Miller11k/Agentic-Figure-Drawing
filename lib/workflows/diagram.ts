@@ -18,6 +18,7 @@ import type {
   DiagramDirectEditWorkflowResult,
   DiagramEditingWorkflowInput,
   DiagramEditingWorkflowResult,
+  DiagramImageReconstructionWorkflowInput,
   DiagramGenerationWorkflowInput,
   DiagramGenerationWorkflowResult,
   DiagramImportWorkflowInput,
@@ -34,7 +35,8 @@ type SafeDiagramCorrections = {
 };
 
 function defaultDiagramImageProvider(): ImageGenerationProvider {
-  return "gemini";
+  const configured = process.env.DIAGRAM_IMAGE_PROVIDER ?? process.env.IMAGE_GENERATION_PROVIDER;
+  return configured === "gemini" ? "gemini" : "openai";
 }
 
 function diagramVisualDraftPrompt(generationPrompt: string, diagramType?: string) {
@@ -153,7 +155,20 @@ export async function runDiagramImportPipeline(
     throw new Error(`Imported XML is invalid: ${validation.errors.join(" ")}`);
   }
 
-  const diagramModel = diagramSpec ? createDiagramModelFromSpec(diagramSpec) : parseDrawioXmlToDiagramModel(validation.xml);
+  const diagramModel = diagramSpec
+    ? (() => {
+        const model = createDiagramModelFromSpec(diagramSpec);
+        return {
+          ...model,
+          sourceXml: input.xml,
+          normalized: {
+            ...model.normalized,
+            format: "mermaid",
+            sourceFileName: input.fileName
+          }
+        };
+      })()
+    : parseDrawioXmlToDiagramModel(validation.xml);
   const artifact = await persistArtifactForVersion({
     sessionId: input.sessionId,
     versionId: version.id,
@@ -191,12 +206,112 @@ export async function runDiagramImportPipeline(
   };
 }
 
+export async function runDiagramImageReconstructionPipeline(
+  input: DiagramImageReconstructionWorkflowInput
+): Promise<DiagramImportWorkflowResult> {
+  const models = getOpenAIModelConfig();
+  const prompt =
+    input.prompt?.trim() ||
+    "Reconstruct this reference image as a clean editable Draw.io diagram. Preserve all visible text, icons, containers, and connectors as separate editable objects.";
+  const version = await createVersionStep({
+    sessionId: input.sessionId,
+    parentVersionId: input.parentVersionId,
+    stepType: "upload",
+    mode: "diagram",
+    prompt,
+    metadata: {
+      pipelineName: "diagram-image-reconstruction",
+      status: "started",
+      fileName: input.fileName,
+      mimeType: input.mimeType ?? "image/png"
+    }
+  });
+  const traceBase = {
+    sessionId: input.sessionId,
+    versionId: version.id,
+    pipelineName: "diagram-image-reconstruction"
+  };
+
+  const sourceArtifact = await persistArtifactForVersion({
+    sessionId: input.sessionId,
+    versionId: version.id,
+    artifactType: "source",
+    fileName: input.fileName ?? "reference-image.png",
+    mimeType: input.mimeType ?? "image/png",
+    data: input.image,
+    metadata: {
+      pipelineName: "diagram-image-reconstruction",
+      role: "reference-image"
+    }
+  });
+
+  const { result: diagramSpec } = await runTracedStage(
+    {
+      ...traceBase,
+      stageName: "openai-reference-image-to-diagram-spec",
+      inputSummary: summarizeForTrace({
+        prompt,
+        imageBytes: input.image.byteLength,
+        mimeType: input.mimeType ?? "image/png"
+      }),
+      modelUsed: models.textModel
+    },
+    () => openAIWorkflowService.generateDiagramSpecFromImage(input.image, prompt, "editable reference reconstruction", input.mimeType ?? "image/png")
+  );
+
+  const diagramModel = createDiagramModelFromSpec(diagramSpec);
+  const generatedXml = createDrawioXmlFromModel(diagramModel);
+  const validation = validateAndRepairDrawioXml(generatedXml);
+
+  if (!validation.valid) {
+    throw new Error(`Image reconstruction produced invalid XML: ${validation.errors.join(" ")}`);
+  }
+
+  const artifact = await persistArtifactForVersion({
+    sessionId: input.sessionId,
+    versionId: version.id,
+    artifactType: "diagram_xml",
+    fileName: "reconstructed.drawio",
+    mimeType: "application/xml",
+    data: Buffer.from(validation.xml, "utf8"),
+    metadata: {
+      pipelineName: "diagram-image-reconstruction",
+      sourceArtifactId: sourceArtifact.id,
+      repairApplied: validation.repairApplied,
+      notes: validation.notes
+    }
+  });
+
+  await updateVersionStructuredState({
+    versionId: version.id,
+    diagramModel,
+    metadata: {
+      pipelineName: "diagram-image-reconstruction",
+      status: "completed",
+      artifactId: artifact.id,
+      sourceArtifactId: sourceArtifact.id,
+      repairApplied: validation.repairApplied
+    },
+    previewArtifactId: artifact.id
+  });
+
+  return {
+    versionId: version.id,
+    diagramModel,
+    xml: validation.xml,
+    artifactId: artifact.id,
+    repairApplied: validation.repairApplied,
+    notes: validation.notes
+  };
+}
+
 export async function runDiagramGenerationPipeline(
   input: DiagramGenerationWorkflowInput
 ): Promise<DiagramGenerationWorkflowResult> {
   const models = getOpenAIModelConfig();
   const googleModels = getGoogleImageModelConfig();
-  const imageProvider = defaultDiagramImageProvider();
+  const imageProvider = input.imageProvider ?? defaultDiagramImageProvider();
+  const visualDraftProvider = imageProvider === "gemini" ? "gemini" : "none";
   const version = await createVersionStep({
     sessionId: input.sessionId,
     parentVersionId: input.parentVersionId,
@@ -208,6 +323,7 @@ export async function runDiagramGenerationPipeline(
       status: "started",
       requestedDiagramType: input.diagramType,
       imageProvider,
+      visualDraftProvider,
       diagramTypeSource: "openai-inferred"
     }
   });
@@ -234,18 +350,34 @@ export async function runDiagramGenerationPipeline(
   const expandedPrompt = expandedDiagramPrompt.expandedPrompt;
   const generationPrompt = expandedPrompt;
 
-  const visualDraft = (
-    await runTracedStage(
-      {
-        ...traceBase,
-        stageName: "generate-gemini-visual-draft-image",
-        inputSummary: summarizeForTrace({ prompt: generationPrompt, diagramType: inferredDiagramType, provider: "gemini" }),
-        modelUsed: googleModels.imageModel
-      },
-      () => googleImageClient.generateImage(diagramVisualDraftPrompt(generationPrompt, inferredDiagramType)),
-      (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType })
-    )
-  ).result;
+  let visualDraft:
+    | {
+        image: Buffer;
+        mimeType: string;
+        modelUsed: string;
+        text?: string;
+      }
+    | undefined;
+  let visualDraftError: string | undefined;
+
+  if (visualDraftProvider === "gemini") {
+    try {
+      visualDraft = (
+        await runTracedStage(
+          {
+            ...traceBase,
+            stageName: "generate-gemini-visual-draft-image",
+            inputSummary: summarizeForTrace({ prompt: generationPrompt, diagramType: inferredDiagramType, provider: "gemini" }),
+            modelUsed: googleModels.imageModel
+          },
+          () => googleImageClient.generateImage(diagramVisualDraftPrompt(generationPrompt, inferredDiagramType)),
+          (result) => summarizeForTrace({ bytes: result.image.byteLength, mimeType: result.mimeType })
+        )
+      ).result;
+    } catch (error) {
+      visualDraftError = (error as Error).message;
+    }
+  }
 
   const visualDraftArtifact = visualDraft
     ? await persistArtifactForVersion({
@@ -268,22 +400,27 @@ export async function runDiagramGenerationPipeline(
   let { result: diagramSpec } = await runTracedStage(
     {
       ...traceBase,
-      stageName: "gemini-image-to-openai-diagram-spec",
+      stageName: visualDraft ? "visual-draft-to-openai-diagram-spec" : "openai-direct-diagram-spec",
       inputSummary: summarizeForTrace({
         prompt: generationPrompt,
         diagramType: inferredDiagramType,
-        hasVisualDraft: true,
-        extractionRoute: "diagram image + extraction prompt -> OpenAI"
+        hasVisualDraft: Boolean(visualDraft),
+        visualDraftError,
+        extractionRoute: visualDraft
+          ? "diagram image + extraction prompt -> OpenAI"
+          : "expanded prompt -> OpenAI structured DiagramSpec"
       }),
       modelUsed: models.textModel
     },
     () =>
-      openAIWorkflowService.generateDiagramSpecFromImage(
-        visualDraft.image,
-        generationPrompt,
-        inferredDiagramType,
-        visualDraft.mimeType
-      )
+      visualDraft
+        ? openAIWorkflowService.generateDiagramSpecFromImage(
+            visualDraft.image,
+            generationPrompt,
+            inferredDiagramType,
+            visualDraft.mimeType
+          )
+        : openAIWorkflowService.generateDiagramSpec(generationPrompt)
   );
 
   let { result: diagramModel } = await runTracedStage(
@@ -412,6 +549,8 @@ export async function runDiagramGenerationPipeline(
       },
       expandedPrompt,
       visualDraftArtifactId: visualDraftArtifact?.id,
+      visualDraftProvider,
+      visualDraftError,
       renderedDiagramArtifactId: renderedDiagramArtifact.id,
       imageProvider,
       verification,
@@ -438,6 +577,8 @@ export async function runDiagramGenerationPipeline(
       },
       expandedPrompt,
       visualDraftArtifactId: visualDraftArtifact?.id,
+      visualDraftProvider,
+      visualDraftError,
       renderedDiagramArtifactId: renderedDiagramArtifact.id,
       imageProvider,
       verification,

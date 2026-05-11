@@ -1,6 +1,6 @@
-# Agentic Figure Drawing
+# SAGE
 
-A session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. The app supports importing Draw.io / diagrams.net XML, Mermaid source, and raster reference images; generating structured diagrams from prompts; reconstructing editable diagrams from screenshots/reference images; prompt-guided diagram edits; direct interactive diagram edits; image generation; uploaded-image editing; localized mask edits; artifact downloads; trace inspection; version history; and metadata-layer revert.
+SAGE is a session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. The app supports importing Draw.io / diagrams.net XML, Mermaid source, and raster reference images; generating structured diagrams from prompts; reconstructing editable diagrams from screenshots/reference images; prompt-guided diagram edits; direct interactive diagram edits; image generation; uploaded-image editing; localized mask edits; artifact downloads; trace inspection; version history; and metadata-layer revert.
 
 The implementation follows `masterspec.md` as the source of truth, with an explicit local override allowing Google Gemini only for image workflows. OpenAI remains the reasoning, validation, and XML authority. Google Gemini can be selected for image generation, diagram visual drafts, and mask-guided image editing; there is no ComfyUI or local non-API model workflow.
 

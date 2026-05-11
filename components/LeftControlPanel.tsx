@@ -261,7 +261,7 @@ export function LeftControlPanel({ history }: { history?: SessionHistoryResponse
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Workspace</p>
             <p className="mt-1 truncate text-base font-semibold tracking-tight text-slate-950">
-              {mode === "diagram" ? "Diagram Studio" : "Image Studio"}
+              {mode === "diagram" ? "SAGE Diagram" : "SAGE Image"}
             </p>
           </div>
           <Pill className="capitalize">{activeSessionId ? "Saved" : "New"}</Pill>

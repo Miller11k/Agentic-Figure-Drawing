@@ -53,7 +53,7 @@ const sourceImage = readFileSync("public/samples/demo-source-image.svg");
 
 const session = await prisma.session.create({
   data: {
-    title: "Demo: stateful diagram and image editing"
+    title: "Demo: SAGE"
   }
 });
 

@@ -38,23 +38,15 @@ Every meaningful operation is stored as a session version, optionally pointing t
 
 ### Diagram Import
 
-`POST /api/diagram/import` accepts Draw.io XML or Mermaid source. Draw.io XML is validated and repaired where possible. Mermaid flowchart, graph, sequence, class, and state-style source is normalized into a `DiagramSpec`, converted into a `DiagramModel`, serialized as Draw.io-compatible XML, and stored as a new session version.
+`POST /api/diagram/import` accepts Draw.io XML or Mermaid source. Mermaid source is normalized into a `DiagramSpec`, converted into a `DiagramModel`, serialized as Draw.io-compatible XML, and stored as a new session version.
 
-The left panel also accepts PNG, JPEG, and WebP reference images via `POST /api/diagram/import-image`. OpenAI vision extracts an editable `DiagramSpec` from the image, which is converted into a `DiagramModel` and stored as Draw.io-compatible XML. The reconstruction workflow is optimized for editability: visible text becomes editable labels, detected containers become groups, detected nodes become movable elements, and detected relationships become connectors.
+`POST /api/diagram/import-image` accepts PNG, JPEG, and WebP reference images. OpenAI vision extracts an editable `DiagramSpec`, which is converted into a `DiagramModel` and stored as Draw.io-compatible XML. Visible text becomes editable labels, containers become groups, nodes become movable elements, and relationships become connectors.
 
-Draw.io import/export preserves common geometry and raw `mxCell` attributes. Grouped child nodes are exported as Draw.io-relative group coordinates, and imported edge waypoints are preserved for closer route fidelity.
+Import/export preserves common geometry, raw `mxCell` attributes, group-relative coordinates, and imported edge waypoints.
 
 ### Diagram Generation
 
-`POST /api/diagram/generate` runs staged generation:
-
-1. OpenAI infers the intended diagram type and expands the prompt into a diagram-specific generation prompt.
-2. The configured diagram image provider can create a visual draft (Gemini when selected).
-3. OpenAI vision converts the visual draft plus expanded prompt into a structured `DiagramSpec`. Without a visual draft provider, OpenAI generates the spec from text directly.
-4. Deterministic helpers convert the spec to a `DiagramModel` and serialize it as Draw.io-compatible XML.
-5. Validation/repair runs before storage.
-6. The rendered diagram is optionally rasterized with Sharp and sent through a conservative OpenAI verification pass for minor label, node-type, and semantics corrections.
-7. Artifacts, version metadata, visual drafts, verification summaries, and traces are persisted.
+`POST /api/diagram/generate` runs staged generation: (1) OpenAI expands the prompt into a diagram-specific generation prompt; (2) an optional visual draft is produced (Gemini when configured); (3) OpenAI vision converts the draft into a `DiagramSpec`, or generates it from text directly if no draft provider is set; (4) deterministic helpers serialize the spec to Draw.io-compatible XML; (5) validation/repair runs before storage; (6) an optional Sharp-backed rasterization feeds a conservative OpenAI verification pass; (7) all artifacts, metadata, and traces are persisted.
 
 ### Prompt-Guided Diagram Editing
 
@@ -62,9 +54,7 @@ Draw.io import/export preserves common geometry and raw `mxCell` attributes. Gro
 
 ### Direct Diagram Editing
 
-`POST /api/diagram/direct-edit` accepts structured direct-edit operations from the interactive canvas, applies deterministic model updates, preserves stable ids where possible, serializes to XML, stores artifacts, and creates a new version.
-
-The canvas includes optimized, hierarchical, grid, and radial layout modes; orthogonal connector routing; imported waypoint rendering; fit-to-view; manual zoom; scrollable navigation; source inspection; direct XML export; and version-history undo/redo. The diagram workspace has an `Edit` view for interactive SVG editing and a `Source` view for inspecting the Draw.io-compatible XML or Mermaid source behind the current artifact.
+`POST /api/diagram/direct-edit` accepts structured canvas operations, applies deterministic model updates, serializes to XML, and creates a new version. The canvas provides hierarchical, grid, and radial layout modes; orthogonal connector routing; fit-to-view; manual zoom; source inspection; XML export; and version-history undo/redo.
 
 ### Image Generation
 
@@ -72,13 +62,13 @@ The canvas includes optimized, hierarchical, grid, and radial layout modes; orth
 
 ### Image Editing and Masks
 
-`POST /api/image/edit` supports uploaded or generated source images plus an optional mask artifact. The frontend mask editor draws over the rendered image and normalizes coordinates before request shaping. OpenAI receives the mask through its native mask parameter. Gemini receives the source and mask images as multimodal input with localized-edit instructions added inside the provider layer. Edited outputs are stored and mask/source metadata is linked into version history without polluting saved user prompts with internal system instructions.
+`POST /api/image/edit` supports uploaded or generated images with an optional mask. OpenAI receives the mask natively; Gemini receives source and mask as multimodal input. Mask/source metadata is linked into version history separately from user prompts.
 
-Mask tooling includes paint/erase modes, brush size, opacity, undo/redo, clear, preview visibility, visible overlay export, and edit-mask export.
+Mask tooling includes paint/erase, brush size, opacity, undo/redo, clear, and mask export.
 
 ### Revert and History
 
-`POST /api/session/:id/revert` moves the session's current-version pointer back to a selected version without creating an extra timeline item. Older history remains immutable and subsequent edits create new versions from the active state. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state. Browser storage persists lightweight editor state so refreshes can recover the last workspace when persistence is available.
+`POST /api/session/:id/revert` moves the current-version pointer to a prior version without rewriting history. `GET /api/session/:id` returns the full version timeline, artifacts, prompt metadata, and workflow state. Browser storage persists editor state across refreshes.
 
 ## OpenAI Integration Points
 
@@ -98,7 +88,7 @@ OpenAI calls are isolated in `lib/openai/service.ts` and composed by workflow se
 - `editImageWithPrompt(image, prompt, mask?)`
 - `summarizeArtifactChanges(before, after, context)`
 
-Structured text outputs are parsed through safe JSON helpers and validated with Zod before workflow code uses them. Empty or invalid structured responses fail fast and are traced. XML repair has deterministic fallback behavior for malformed or partial Draw.io documents.
+Structured outputs are parsed through safe JSON helpers and validated with Zod. Invalid responses fail fast and are traced. XML repair has deterministic fallback behavior for malformed Draw.io documents.
 
 ## Setup
 
@@ -242,19 +232,11 @@ The test suite covers:
 - frontend image edit request shaping and prompt sanitization
 - session history and revert metadata behavior
 
-Quality gates:
-
-- `npm run lint` checks the Next.js/React code with `next/core-web-vitals`.
-- `npm run typecheck` runs strict TypeScript validation.
-- `npm test` runs the deterministic Vitest suite.
-- `npm run build:isolated` runs a production-style Next build into `.next-build/`, which is useful on Windows or while a dev server owns `.next/`.
-- `npm run validate` runs lint, typecheck, tests, and the isolated build as one presentation-ready check.
-
-The live OpenAI smoke test is intentionally opt-in and skipped by default so the normal suite does not require network access or spend API credits. Set `LIVE_OPENAI_SMOKE=1` when you specifically want to validate real OpenAI schema responses against the service normalizers.
+`npm run validate` runs lint, typecheck, tests, and an isolated build as one check. The live OpenAI smoke test is opt-in; set `LIVE_OPENAI_SMOKE=1` to run it.
 
 ## Report and Paper Artifacts
 
-This repository includes the artifacts used in the ASE Tools-style paper and class report. The paper uses compact versions of several figures to satisfy the page limit, so larger versions are included here for easier inspection.
+Artifacts from the ASE Tools-style paper. Larger versions of paper figures are included here for easier inspection.
 
 ### Demonstrated Workflow
 
@@ -272,12 +254,13 @@ This repository includes the artifacts used in the ASE Tools-style paper and cla
 
 ### System Workflow Figures
 
-The repository also includes the workflow diagrams used to explain the tool architecture:
+**Structured diagram-editing workflow** — prompt input → model-assisted reasoning → deterministic transformation → versioned Draw.io XML output:
 
-| File | Description |
-|---|---|
-| `figures/structured_diagram_editing_workflow.jpg` | Structured diagram-editing workflow, including prompt input, model-assisted reasoning, deterministic transformation, versioned storage, and Draw.io XML output. |
-| `figures/image_editing_workflow.jpg` | Image-editing workflow, including prompt and mask input, model-assisted image editing, artifact linking, versioned storage, and image outputs. |
+![Structured diagram editing workflow](structured_diagram_editing_workflow.jpg)
+
+**Image-editing workflow** — prompt and mask input → model-assisted image editing → artifact linking → versioned image output:
+
+![Image editing workflow](image_editing_workflow.jpg)
 
 ### Additional Report Materials
 
@@ -300,16 +283,13 @@ Benchmark-oriented fixtures live in `benchmarks/fixtures/`:
 
 ## Known Limitations
 
-- The diagram canvas supports practical interactive edits, optimized layout, deterministic layout modes, edge routing, imported waypoints, manual zoom, scroll, explicit fit-to-view, source inspection, direct XML export, and cleaner user-facing recovery. It is still intentionally lighter than diagrams.net for advanced power-user operations such as custom libraries, plugin-backed shape registries, and full keyboard command parity.
-- Draw.io XML compatibility now preserves common structure, group-relative geometry, imported edge waypoints, and many raw `mxCell` attributes during round-trip. Very exotic diagrams.net features such as plugin payloads, embedded libraries, custom shape registries, advanced label geometries, or plugin-owned metadata may still require repair or targeted compatibility work.
-- Mermaid import covers the diagram families most relevant to this prototype: flowchart/graph, sequence, class, and state-style edge/node declarations. Advanced Mermaid directives, themes, notes, and plugin-specific syntax are ignored or preserved only through the generated structured representation.
-- OpenAI image generation/editing depends on account model access and provider-side latency.
-- Gemini mask-guided editing uses the source image plus exported mask as multimodal guidance because Gemini does not use the same native alpha-mask inpainting parameter as OpenAI. It is supported, but OpenAI remains the stricter option for pixel-protected localized edits.
-- Diagram verification is intentionally conservative. It can improve label clarity, node type semantics, and obvious wording issues, but it does not reconstruct missing topology or replace an otherwise usable diagram with a brand-new one.
-- Sharp-backed verification snapshots require the optional rasterization step to succeed in the runtime environment; if rasterization fails, the workflow falls back to structured text verification.
-- Revert and undo/redo move the current-version pointer through persisted history rather than creating extra timeline entries. This keeps history readable, but local per-keystroke command replay remains intentionally lightweight.
-- The mask editor supports aligned drawing, paint/erase, lasso fill, feathered mask export, opacity, undo/redo, clear, request shaping, and mask export. It does not yet include semantic segmentation or AI-assisted automatic region selection.
-- Authentication, multi-user authorization, hosted object storage, and production observability are outside the current prototype.
+- The canvas is intentionally lighter than diagrams.net — no custom shape libraries, plugin registries, or full keyboard command parity.
+- Very exotic Draw.io features (plugin payloads, embedded libraries, advanced label geometries) may still require repair after round-trip.
+- Mermaid import covers flowchart/graph, sequence, class, and state diagrams. Advanced directives and plugin-specific syntax are not supported.
+- Gemini mask-guided editing uses multimodal source+mask input rather than native alpha-mask inpainting; OpenAI is the stricter option for pixel-protected edits.
+- Diagram verification is conservative — it corrects labels and node types but does not reconstruct missing topology.
+- The mask editor does not include semantic segmentation or AI-assisted region selection.
+- Authentication, multi-user authorization, hosted object storage, and production observability are out of scope for this prototype.
 
 ## Future Work
 

@@ -1,9 +1,9 @@
 # Benchmark Fixtures
 
-These fixtures are intentionally local and deterministic. They are meant to support repeatable prototype evaluation without adding another model provider or external workflow runner.
+Local deterministic fixtures for repeatable prototype evaluation.
 
-- `benchmark-suite.json` is the manifest for XML compatibility, edit quality, latency, and recoverability checks.
+- `benchmark-suite.json` defines XML compatibility, edit quality, latency, and recoverability checks.
 - `xml-compatibility.drawio` is a grouped Draw.io diagram with labeled edges and mixed styles.
-- `recoverability-missing-root.xml` is malformed-but-repairable XML used to validate repair behavior.
+- `recoverability-missing-root.xml` is malformed-but-repairable XML for repair validation.
 
-The prompts in the manifest are designed to exercise the existing OpenAI-backed route handlers and trace panel. They are not automatically executed by the test suite because live OpenAI calls should remain explicit.
+Manifest prompts exercise existing route handlers and traces, but live OpenAI calls remain explicit and are not run automatically by the test suite.

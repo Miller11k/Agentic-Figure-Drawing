@@ -238,6 +238,16 @@ The test suite covers:
 
 Artifacts from the ASE Tools-style paper. Larger versions of paper figures are included here for easier inspection.
 
+### System Workflow Figures
+
+**Structured diagram-editing workflow** — prompt input → model-assisted reasoning → deterministic transformation → versioned Draw.io XML output:
+
+![Structured diagram editing workflow](structured_diagram_editing_workflow.jpg)
+
+**Image-editing workflow** — prompt and mask input → model-assisted image editing → artifact linking → versioned image output:
+
+![Image editing workflow](image_editing_workflow.jpg)
+
 ### Demonstrated Workflow
 
 **Reference input** — original Kubernetes cluster architecture diagram used as the reconstruction benchmark input:
@@ -251,16 +261,6 @@ Artifacts from the ASE Tools-style paper. Larger versions of paper figures are i
 **Image editing output** — final result after sequential semantic edits to the Kubernetes diagram:
 
 ![Kubernetes image edit final](image_edit_kubernetes_final.png)
-
-### System Workflow Figures
-
-**Structured diagram-editing workflow** — prompt input → model-assisted reasoning → deterministic transformation → versioned Draw.io XML output:
-
-![Structured diagram editing workflow](structured_diagram_editing_workflow.jpg)
-
-**Image-editing workflow** — prompt and mask input → model-assisted image editing → artifact linking → versioned image output:
-
-![Image editing workflow](image_editing_workflow.jpg)
 
 ### Additional Report Materials
 

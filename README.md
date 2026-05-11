@@ -253,9 +253,36 @@ Quality gates:
 
 The live OpenAI smoke test is intentionally opt-in and skipped by default so the normal suite does not require network access or spend API credits. Set `LIVE_OPENAI_SMOKE=1` when you specifically want to validate real OpenAI schema responses against the service normalizers.
 
-## Report Artifacts
+## Report and Paper Artifacts
 
-Report-ready descriptions for the system architecture diagram, internal data-flow diagram, session history/versioning diagram, evaluation workflow figure, evaluation plan, limitations, and future work are in `docs/report-artifacts.md`.
+This repository includes the artifacts used in the ASE Tools-style paper and class report. The paper uses compact versions of several figures to satisfy the page limit, so larger versions are included here for easier inspection.
+
+### Larger Versions of Paper Figures
+
+The following files correspond to the paper’s evaluation figures:
+
+| Paper Figure | File | Description |
+|---|---|---|
+| Figure 3 | `kubernetes_reference.png` | Original Kubernetes cluster architecture diagram used as the reference input for the reconstruction benchmark. |
+| Figure 4 | `kubernetes_final_result.png` | Final structured diagram output after the prompt-guided edit sequence. |
+| Figure 5 | `image_edit_kubernetes_final.png` | Final image-editing output after sequential semantic edits to the Kubernetes diagram. |
+
+These larger artifacts make it easier to inspect labels, connector structure, layout changes, and visual degradation that may be hard to see in the paper’s smaller figure versions.
+
+### System Workflow Figures
+
+The repository also includes the workflow diagrams used to explain the tool architecture:
+
+| File | Description |
+|---|---|
+| `figures/structured_diagram_editing_workflow.jpg` | Structured diagram-editing workflow, including prompt input, model-assisted reasoning, deterministic transformation, versioned storage, and Draw.io XML output. |
+| `figures/image_editing_workflow.jpg` | Image-editing workflow, including prompt and mask input, model-assisted image editing, artifact linking, versioned storage, and image outputs. |
+
+### Additional Report Materials
+
+Report-ready descriptions for the system architecture diagram, internal data-flow diagram, session history/versioning diagram, evaluation workflow figure, evaluation plan, limitations, and future work are in:
+
+- `docs/report-artifacts.md`
 
 Local fixtures for report screenshots and repeatable demos live in `public/samples/`:
 

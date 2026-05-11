@@ -1,8 +1,8 @@
 # SAGE
 
-SAGE is a session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. The app supports importing Draw.io / diagrams.net XML, Mermaid source, and raster reference images; generating structured diagrams from prompts; reconstructing editable diagrams from screenshots/reference images; prompt-guided diagram edits; direct interactive diagram edits; image generation; uploaded-image editing; localized mask edits; artifact downloads; trace inspection; version history; and metadata-layer revert.
+SAGE is a session-aware diagram and image editing prototype built around OpenAI reasoning and generation workflows. It supports importing Draw.io/diagrams.net XML, Mermaid source, and raster reference images; generating structured diagrams from prompts; reconstructing editable diagrams from screenshots; prompt-guided and direct interactive diagram edits; image generation and editing; localized mask edits; artifact downloads; trace inspection; version history; and metadata-layer revert.
 
-The implementation follows `masterspec.md` as the source of truth, with an explicit local override allowing Google Gemini only for image workflows. OpenAI remains the reasoning, validation, and XML authority. Google Gemini can be selected for image generation, diagram visual drafts, and mask-guided image editing; there is no ComfyUI or local non-API model workflow.
+The implementation follows `masterspec.md` as the source of truth. OpenAI is the reasoning, validation, and XML authority. Google Gemini can optionally be selected for image generation, diagram visual drafts, and mask-guided image editing; there is no ComfyUI or local non-API model workflow.
 
 ## Tech Stack
 
@@ -22,40 +22,39 @@ The implementation follows `masterspec.md` as the source of truth, with an expli
 
 The system is organized as thin UI and API layers over reusable service modules.
 
-- `app/api/*` contains typed route handlers. Routes validate inputs with Zod, then delegate to services.
-- `lib/workflows/*` contains explicit multi-stage orchestration for diagram and image workflows.
-- `lib/openai/*` centralizes OpenAI client creation, model wrappers, trace-aware stage calls, response validation, and safe JSON parsing.
-- `lib/xml/drawio.ts` isolates Draw.io-compatible XML import, validation, repair, and serialization.
-- `lib/diagram/*` contains deterministic structured edit helpers and direct-edit reducers.
-- `lib/session/*` owns session, version, history, revert, prompt metadata, and trace persistence.
-- `lib/storage/*` owns artifact persistence and filesystem storage.
-- `features/*` contains frontend domain modules for session state, diagram editing, and image editing.
-- `types/core.ts` defines the shared strongly typed contracts used by backend, workflows, and UI.
+- `app/api/*` — typed route handlers; validate inputs with Zod, then delegate to services.
+- `lib/workflows/*` — multi-stage orchestration for diagram and image workflows.
+- `lib/openai/*` — OpenAI client creation, model wrappers, trace-aware stage calls, response validation, and safe JSON parsing.
+- `lib/xml/drawio.ts` — Draw.io-compatible XML import, validation, repair, and serialization.
+- `lib/diagram/*` — deterministic structured edit helpers and direct-edit reducers.
+- `lib/session/*` — session, version, history, revert, prompt metadata, and trace persistence.
+- `lib/storage/*` — artifact persistence and filesystem storage.
+- `features/*` — frontend domain modules for session state, diagram editing, and image editing.
+- `types/core.ts` — shared strongly typed contracts used by backend, workflows, and UI.
 
-The app stores every meaningful operation as a session version. Each version can point to one or more artifacts, such as Draw.io XML, diagram models, image outputs, uploads, or masks. OpenAI and deterministic workflow stages are recorded as traces for report/debug use through API responses, tests, and persisted metadata. The default frontend keeps artifact internals, trace inspection, and inspector-style observability out of the primary editing flow, while the history panel still exposes version ids for reproducible debugging and reports.
+Every meaningful operation is stored as a session version, optionally pointing to Draw.io XML, diagram models, image outputs, uploads, or masks. OpenAI and deterministic workflow stages are recorded as traces for report/debug use.
 
 ## Major Workflows
 
 ### Diagram Import
 
-`POST /api/diagram/import` accepts Draw.io XML or Mermaid source. Draw.io XML is validated and repaired where possible. Mermaid flowchart, graph, sequence, class, and state-style source is normalized into a `DiagramSpec`, converted into a `DiagramModel`, serialized as Draw.io-compatible XML, persisted as artifacts, and stored as a new session version.
+`POST /api/diagram/import` accepts Draw.io XML or Mermaid source. Draw.io XML is validated and repaired where possible. Mermaid flowchart, graph, sequence, class, and state-style source is normalized into a `DiagramSpec`, converted into a `DiagramModel`, serialized as Draw.io-compatible XML, and stored as a new session version.
 
-The left panel's diagram import control also accepts PNG, JPEG, and WebP reference images. Image imports call `POST /api/diagram/import-image`, persist the source image, ask OpenAI vision to extract an editable `DiagramSpec`, convert that spec into a `DiagramModel`, and store Draw.io-compatible XML. The reconstruction workflow is optimized for editability: visible text becomes editable labels, detected containers become groups, detected nodes/icons become separate movable elements, and detected relationships become connectors where the model can infer them.
+The left panel also accepts PNG, JPEG, and WebP reference images via `POST /api/diagram/import-image`. OpenAI vision extracts an editable `DiagramSpec` from the image, which is converted into a `DiagramModel` and stored as Draw.io-compatible XML. The reconstruction workflow is optimized for editability: visible text becomes editable labels, detected containers become groups, detected nodes become movable elements, and detected relationships become connectors.
 
-Draw.io import/export preserves common geometry and raw `mxCell` attributes where practical. Grouped child nodes are rendered with absolute canvas coordinates for editing and exported back as Draw.io-relative group coordinates. Imported edge waypoints are preserved for closer route fidelity in both the editable canvas and SVG export.
+Draw.io import/export preserves common geometry and raw `mxCell` attributes. Grouped child nodes are exported as Draw.io-relative group coordinates, and imported edge waypoints are preserved for closer route fidelity.
 
 ### Diagram Generation
 
 `POST /api/diagram/generate` runs staged generation:
 
-1. OpenAI infers the intended diagram type from the user's prompt and expands it into an expert-level, diagram-specific generation prompt.
-2. The configured diagram image provider can create a visual draft. When `gemini` is selected, this uses Google's Nano Banana 2 image model.
-3. OpenAI vision converts the visual draft plus expanded prompt into a structured `DiagramSpec`. If no visual draft provider is configured, OpenAI generates the `DiagramSpec` directly from text.
-4. Deterministic helpers convert the spec to a `DiagramModel`.
-5. XML utilities serialize the model into Draw.io-compatible XML.
-6. Validation/repair runs before the XML is stored.
-7. The rendered diagram is optionally rasterized with Sharp and sent through a conservative OpenAI verification pass for minor label, node-type, and semantics corrections without replacing the generated structure.
-8. Artifacts, version metadata, visual drafts, verification summaries, and traces are persisted.
+1. OpenAI infers the intended diagram type and expands the prompt into a diagram-specific generation prompt.
+2. The configured diagram image provider can create a visual draft (Gemini when selected).
+3. OpenAI vision converts the visual draft plus expanded prompt into a structured `DiagramSpec`. Without a visual draft provider, OpenAI generates the spec from text directly.
+4. Deterministic helpers convert the spec to a `DiagramModel` and serialize it as Draw.io-compatible XML.
+5. Validation/repair runs before storage.
+6. The rendered diagram is optionally rasterized with Sharp and sent through a conservative OpenAI verification pass for minor label, node-type, and semantics corrections.
+7. Artifacts, version metadata, visual drafts, verification summaries, and traces are persisted.
 
 ### Prompt-Guided Diagram Editing
 
@@ -65,21 +64,21 @@ Draw.io import/export preserves common geometry and raw `mxCell` attributes wher
 
 `POST /api/diagram/direct-edit` accepts structured direct-edit operations from the interactive canvas, applies deterministic model updates, preserves stable ids where possible, serializes to XML, stores artifacts, and creates a new version.
 
-The canvas includes optimized, hierarchical, grid, and radial deterministic layout modes, orthogonal connector routing, imported waypoint rendering, explicit fit-to-view, manual zoom controls, scrollable workspace navigation, source inspection, direct XML export, and version-history undo/redo. Manual zoom is preserved while editing; the canvas only fits the diagram when the user presses the fit control. The diagram workspace has an `Edit` view for interactive SVG editing and a `Source` view for inspecting the exact Draw.io-compatible XML or imported Mermaid source behind the current artifact.
+The canvas includes optimized, hierarchical, grid, and radial layout modes; orthogonal connector routing; imported waypoint rendering; fit-to-view; manual zoom; scrollable navigation; source inspection; direct XML export; and version-history undo/redo. The diagram workspace has an `Edit` view for interactive SVG editing and a `Source` view for inspecting the Draw.io-compatible XML or Mermaid source behind the current artifact.
 
 ### Image Generation
 
-`POST /api/image/generate` calls the selected image provider wrapper, stores the generated image artifact, creates a version, and records trace metadata. OpenAI remains available as the default provider, while Gemini Nano Banana 2 can be enabled for image output through environment configuration.
+`POST /api/image/generate` calls the selected image provider wrapper, stores the generated image artifact, creates a version, and records trace metadata. OpenAI is the default provider; Gemini Nano Banana 2 can be enabled through environment configuration.
 
 ### Image Editing and Masks
 
-`POST /api/image/edit` supports uploaded or generated source images plus an optional mask artifact. The frontend mask editor draws directly over the rendered image and normalizes coordinates before request shaping. OpenAI receives the mask through its native mask parameter. Gemini receives the source image and mask image as multimodal input with strict localized-edit instructions added inside the provider layer. The backend stores edited image outputs and links mask/source metadata into version history without polluting saved user prompts with internal system instructions.
+`POST /api/image/edit` supports uploaded or generated source images plus an optional mask artifact. The frontend mask editor draws over the rendered image and normalizes coordinates before request shaping. OpenAI receives the mask through its native mask parameter. Gemini receives the source and mask images as multimodal input with localized-edit instructions added inside the provider layer. Edited outputs are stored and mask/source metadata is linked into version history without polluting saved user prompts with internal system instructions.
 
 Mask tooling includes paint/erase modes, brush size, opacity, undo/redo, clear, preview visibility, visible overlay export, and edit-mask export.
 
 ### Revert and History
 
-`POST /api/session/:id/revert` moves the session's current-version pointer back to the selected version without creating an extra timeline item. Older history remains immutable, and subsequent edits create new versions from the active state. In the UI, clicking a history card restores the full image or diagram state and updates the session pointer. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state. Browser storage persists lightweight editor state such as the active session, artifact, mode, provider, prompt, and history visibility so refreshes can recover the last workspace when persistence is available.
+`POST /api/session/:id/revert` moves the session's current-version pointer back to a selected version without creating an extra timeline item. Older history remains immutable and subsequent edits create new versions from the active state. `GET /api/session/:id` returns the full version timeline, current version, artifacts, prompt metadata, and structured workflow state. Browser storage persists lightweight editor state so refreshes can recover the last workspace when persistence is available.
 
 ## OpenAI Integration Points
 
@@ -257,17 +256,19 @@ The live OpenAI smoke test is intentionally opt-in and skipped by default so the
 
 This repository includes the artifacts used in the ASE Tools-style paper and class report. The paper uses compact versions of several figures to satisfy the page limit, so larger versions are included here for easier inspection.
 
-### Larger Versions of Paper Figures
+### Demonstrated Workflow
 
-The following files correspond to the paper’s evaluation figures:
+**Reference input** — original Kubernetes cluster architecture diagram used as the reconstruction benchmark input:
 
-| Paper Figure | File | Description |
-|---|---|---|
-| Figure 3 | `kubernetes_reference.png` | Original Kubernetes cluster architecture diagram used as the reference input for the reconstruction benchmark. |
-| Figure 4 | `kubernetes_final_result.png` | Final structured diagram output after the prompt-guided edit sequence. |
-| Figure 5 | `image_edit_kubernetes_final.png` | Final image-editing output after sequential semantic edits to the Kubernetes diagram. |
+![Kubernetes reference diagram](kubernetes_reference.png)
 
-These larger artifacts make it easier to inspect labels, connector structure, layout changes, and visual degradation that may be hard to see in the paper’s smaller figure versions.
+**Diagram reconstruction output** — final structured diagram after the prompt-guided edit sequence:
+
+![Kubernetes final diagram result](kubernetes_final_result.png)
+
+**Image editing output** — final result after sequential semantic edits to the Kubernetes diagram:
+
+![Kubernetes image edit final](image_edit_kubernetes_final.png)
 
 ### System Workflow Figures
 
